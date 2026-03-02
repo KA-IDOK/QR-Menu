@@ -1,0 +1,5 @@
+{
+  "name": "Bodega QR Menu",
+  "description": "A digital QR menu system for Bodega Coworking Cafe with admin management and customer ordering interface.",
+  "requestFramePermissions": []
+}
