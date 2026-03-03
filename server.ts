@@ -1,15 +1,10 @@
-import "dotenv/config";
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import Database from "better-sqlite3";
 import path from "path";
 import fs from "fs";
-import cors from "cors";
-import compression from "compression";
 
 const db = new Database("menu.db");
-db.pragma('journal_mode = WAL');
-db.pragma('synchronous = NORMAL');
 
 // Initialize database
 db.exec(`
@@ -214,77 +209,18 @@ if (categoryCount.count === 0) {
 }
 
 async function startServer() {
-  const isProd = process.env.NODE_ENV === "production";
-  console.log(`[${new Date().toISOString()}] Starting server in ${isProd ? 'production' : 'development'} mode`);
-
-  // Start Vite initialization early in development
-  let vitePromise: Promise<any> | null = null;
-  if (!isProd) {
-    console.log(`[${new Date().toISOString()}] Initializing Vite server...`);
-    vitePromise = createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-      root: path.resolve("."),
-    });
-  }
-
   const app = express();
-  const PORT = Number(process.env.PORT) || 3000;
+  const PORT = 3000;
 
-  // Basic middleware
-  app.use(compression());
-  app.use(cors());
   app.use(express.json({ limit: '10mb' }));
 
   // API Routes
-  app.use((req, res, next) => {
-    // Skip logging for Vite internal requests to reduce noise and overhead
-    if (!req.url.startsWith('/@') && !req.url.includes('node_modules')) {
-      console.log(`${req.method} ${req.url}`);
-    }
-    next();
-  });
-
   app.get("/api/menu", (req, res) => {
-    const start = performance.now();
-    const rows = db.prepare(`
-      SELECT 
-        c.id as cat_id, c.name as cat_name,
-        i.id as item_id, i.name as item_name, i.price_hot, i.price_cold, i.price_fixed, 
-        i.description, i.available, i.image, i.addons
-      FROM categories c
-      LEFT JOIN items i ON c.id = i.category_id
-      ORDER BY c.id, i.id
-    `).all() as any[];
-
-    const menuMap = new Map();
-    rows.forEach(row => {
-      if (!menuMap.has(row.cat_id)) {
-        menuMap.set(row.cat_id, {
-          id: row.cat_id,
-          name: row.cat_name,
-          items: []
-        });
-      }
-      if (row.item_id) {
-        menuMap.get(row.cat_id).items.push({
-          id: row.item_id,
-          category_id: row.cat_id,
-          name: row.item_name,
-          price_hot: row.price_hot,
-          price_cold: row.price_cold,
-          price_fixed: row.price_fixed,
-          description: row.description,
-          available: row.available,
-          image: row.image,
-          addons: row.addons
-        });
-      }
+    const categories = db.prepare("SELECT * FROM categories").all();
+    const menu = categories.map((cat: any) => {
+      const items = db.prepare("SELECT * FROM items WHERE category_id = ?").all(cat.id);
+      return { ...cat, items };
     });
-
-    const menu = Array.from(menuMap.values());
-    const end = performance.now();
-    console.log(`[${new Date().toISOString()}] /api/menu (optimized) took ${(end - start).toFixed(2)}ms`);
     res.json(menu);
   });
 
@@ -420,29 +356,24 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  if (isProd) {
+  // Vite middleware for development
+  if (process.env.NODE_ENV !== "production") {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+  } else {
     app.use(express.static("dist"));
     app.get("*", (req, res) => {
       res.sendFile(path.resolve("dist/index.html"));
     });
-  } else if (vitePromise) {
-    // Vite middleware for development - placed after API routes
-    const vite = await vitePromise;
-    app.use(vite.middlewares);
   }
 
-  // Start listening immediately
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`[${new Date().toISOString()}] Server listening on port ${PORT}`);
-  });
-
-  // Background tasks
-  (async () => {
-    // Auto-seed if empty
-    const count = db.prepare("SELECT COUNT(*) as count FROM categories").get() as any;
-    if (count.count === 0) {
-      console.log("Database empty, seeding initial menu...");
-      // ... seeding logic ...
+  // Auto-seed if empty
+  const count = db.prepare("SELECT COUNT(*) as count FROM categories").get() as any;
+  if (count.count === 0) {
+    console.log("Database empty, seeding initial menu...");
     const initialData = [
       {
         name: "Specialty Espresso",
@@ -559,8 +490,11 @@ async function startServer() {
         }
       }
     })();
-    }
-  })();
+  }
+
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
 }
 
 startServer();

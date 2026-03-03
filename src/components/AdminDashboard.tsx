@@ -6,7 +6,6 @@ import { Plus, Trash2, Save, Upload, RefreshCw, QrCode, LayoutDashboard, Setting
 import { extractMenuFromImage } from '../services/geminiService';
 import { motion, AnimatePresence } from 'motion/react';
 import { Order } from '../types';
-import { apiFetch } from '../lib/api';
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
@@ -23,14 +22,14 @@ export default function AdminDashboard() {
   const [isSaving, setIsSaving] = useState(false);
 
   const fetchMenu = async () => {
-    const res = await apiFetch('/api/menu');
+    const res = await fetch('/api/menu');
     const data = await res.json();
     setMenu(data);
     setLoading(false);
   };
 
   const fetchOrders = async () => {
-    const res = await apiFetch('/api/admin/orders');
+    const res = await fetch('/api/admin/orders');
     const data = await res.json();
     setOrders(data);
   };
@@ -47,7 +46,7 @@ export default function AdminDashboard() {
   }, [view]);
 
   const updateOrderStatus = async (orderId: number, status: string, isPaid: number) => {
-    await apiFetch(`/api/admin/orders/${orderId}`, {
+    await fetch(`/api/admin/orders/${orderId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status, is_paid: isPaid }),
@@ -65,7 +64,7 @@ export default function AdminDashboard() {
       const base64 = (reader.result as string).split(',')[1];
       try {
         const extracted = await extractMenuFromImage(base64);
-        await apiFetch('/api/seed', {
+        await fetch('/api/seed', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(extracted),
@@ -85,7 +84,7 @@ export default function AdminDashboard() {
     const item = menu.flatMap(c => c.items).find(i => i.id === id);
     if (!item) return;
     
-    await apiFetch(`/api/items/${id}`, {
+    await fetch(`/api/items/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...item, available, addons: addons ?? item.addons }),
@@ -99,7 +98,7 @@ export default function AdminDashboard() {
 
   const deleteItem = async (id: number) => {
     if (!confirm('Are you sure?')) return;
-    await apiFetch(`/api/items/${id}`, { method: 'DELETE' });
+    await fetch(`/api/items/${id}`, { method: 'DELETE' });
     fetchMenu();
   };
 
@@ -112,7 +111,7 @@ export default function AdminDashboard() {
       const method = editingItem.id ? 'PUT' : 'POST';
       const url = editingItem.id ? `/api/items/${editingItem.id}` : '/api/items';
       
-      await apiFetch(url, {
+      await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(editingItem),
@@ -271,13 +270,7 @@ export default function AdminDashboard() {
                         <div className="flex gap-6 items-center relative z-10">
                           {item.image && (
                             <div className="w-20 h-20 rounded-xl overflow-hidden border-2 border-black shrink-0">
-                              <img 
-                                src={item.image} 
-                                alt={item.name} 
-                                className="w-full h-full object-cover" 
-                                referrerPolicy="no-referrer" 
-                                loading="lazy"
-                              />
+                              <img src={item.image} alt={item.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                             </div>
                           )}
                           <div>
@@ -697,13 +690,7 @@ export default function AdminDashboard() {
                   <div className="flex flex-col items-center gap-4 p-6 border-2 border-dashed border-black rounded-3xl bg-gray-50">
                     {editingItem.image ? (
                       <div className="relative w-full aspect-video rounded-2xl overflow-hidden border-2 border-black">
-                        <img 
-                          src={editingItem.image} 
-                          alt="Preview" 
-                          className="w-full h-full object-cover" 
-                          referrerPolicy="no-referrer" 
-                          loading="lazy"
-                        />
+                        <img src={editingItem.image} alt="Preview" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                         <button 
                           type="button"
                           onClick={() => setEditingItem({...editingItem, image: ''})}
