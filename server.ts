@@ -1,8 +1,10 @@
+import "dotenv/config";
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import Database from "better-sqlite3";
 import path from "path";
 import fs from "fs";
+import cors from "cors";
 
 const db = new Database("menu.db");
 
@@ -210,7 +212,7 @@ if (categoryCount.count === 0) {
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   const isProd = process.env.NODE_ENV === "production";
 
@@ -224,6 +226,7 @@ async function startServer() {
     app.use(vite.middlewares);
   }
 
+  app.use(cors());
   app.use(express.json({ limit: '10mb' }));
 
   // API Routes

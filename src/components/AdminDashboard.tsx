@@ -6,6 +6,7 @@ import { Plus, Trash2, Save, Upload, RefreshCw, QrCode, LayoutDashboard, Setting
 import { extractMenuFromImage } from '../services/geminiService';
 import { motion, AnimatePresence } from 'motion/react';
 import { Order } from '../types';
+import { apiFetch } from '../lib/api';
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
@@ -22,14 +23,14 @@ export default function AdminDashboard() {
   const [isSaving, setIsSaving] = useState(false);
 
   const fetchMenu = async () => {
-    const res = await fetch('/api/menu');
+    const res = await apiFetch('/api/menu');
     const data = await res.json();
     setMenu(data);
     setLoading(false);
   };
 
   const fetchOrders = async () => {
-    const res = await fetch('/api/admin/orders');
+    const res = await apiFetch('/api/admin/orders');
     const data = await res.json();
     setOrders(data);
   };
@@ -46,7 +47,7 @@ export default function AdminDashboard() {
   }, [view]);
 
   const updateOrderStatus = async (orderId: number, status: string, isPaid: number) => {
-    await fetch(`/api/admin/orders/${orderId}`, {
+    await apiFetch(`/api/admin/orders/${orderId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status, is_paid: isPaid }),
@@ -64,7 +65,7 @@ export default function AdminDashboard() {
       const base64 = (reader.result as string).split(',')[1];
       try {
         const extracted = await extractMenuFromImage(base64);
-        await fetch('/api/seed', {
+        await apiFetch('/api/seed', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(extracted),
@@ -84,7 +85,7 @@ export default function AdminDashboard() {
     const item = menu.flatMap(c => c.items).find(i => i.id === id);
     if (!item) return;
     
-    await fetch(`/api/items/${id}`, {
+    await apiFetch(`/api/items/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...item, available, addons: addons ?? item.addons }),
@@ -98,7 +99,7 @@ export default function AdminDashboard() {
 
   const deleteItem = async (id: number) => {
     if (!confirm('Are you sure?')) return;
-    await fetch(`/api/items/${id}`, { method: 'DELETE' });
+    await apiFetch(`/api/items/${id}`, { method: 'DELETE' });
     fetchMenu();
   };
 
@@ -111,7 +112,7 @@ export default function AdminDashboard() {
       const method = editingItem.id ? 'PUT' : 'POST';
       const url = editingItem.id ? `/api/items/${editingItem.id}` : '/api/items';
       
-      await fetch(url, {
+      await apiFetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(editingItem),
