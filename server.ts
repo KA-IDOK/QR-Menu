@@ -215,17 +215,9 @@ async function startServer() {
   const PORT = Number(process.env.PORT) || 3000;
 
   const isProd = process.env.NODE_ENV === "production";
+  console.log(`Starting server in ${isProd ? 'production' : 'development'} mode`);
 
-  // Vite middleware for development - MOVE TO TOP
-  if (!isProd) {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-      root: process.cwd(),
-    });
-    app.use(vite.middlewares);
-  }
-
+  // Basic middleware
   app.use(cors());
   app.use(express.json({ limit: '10mb' }));
 
@@ -376,12 +368,19 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  // Vite middleware block removed from here
   if (isProd) {
     app.use(express.static("dist"));
     app.get("*", (req, res) => {
       res.sendFile(path.resolve("dist/index.html"));
     });
+  } else {
+    // Vite middleware for development - placed after API routes
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+      root: path.resolve("."),
+    });
+    app.use(vite.middlewares);
   }
 
   // Auto-seed if empty
