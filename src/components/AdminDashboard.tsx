@@ -271,7 +271,13 @@ export default function AdminDashboard() {
                         <div className="flex gap-6 items-center relative z-10">
                           {item.image && (
                             <div className="w-20 h-20 rounded-xl overflow-hidden border-2 border-black shrink-0">
-                              <img src={item.image} alt={item.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                              <img 
+                                src={item.image} 
+                                alt={item.name} 
+                                className="w-full h-full object-cover" 
+                                referrerPolicy="no-referrer" 
+                                loading="lazy"
+                              />
                             </div>
                           )}
                           <div>
@@ -691,7 +697,13 @@ export default function AdminDashboard() {
                   <div className="flex flex-col items-center gap-4 p-6 border-2 border-dashed border-black rounded-3xl bg-gray-50">
                     {editingItem.image ? (
                       <div className="relative w-full aspect-video rounded-2xl overflow-hidden border-2 border-black">
-                        <img src={editingItem.image} alt="Preview" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                        <img 
+                          src={editingItem.image} 
+                          alt="Preview" 
+                          className="w-full h-full object-cover" 
+                          referrerPolicy="no-referrer" 
+                          loading="lazy"
+                        />
                         <button 
                           type="button"
                           onClick={() => setEditingItem({...editingItem, image: ''})}

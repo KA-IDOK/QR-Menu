@@ -286,7 +286,13 @@ export default function CustomerMenu() {
                         
                         {item.image && (
                           <div className="relative w-full aspect-video rounded-xl overflow-hidden mb-4 border border-black/10 group-hover:border-white/20 transition-colors">
-                            <img src={item.image} alt={item.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                            <img 
+                              src={item.image} 
+                              alt={item.name} 
+                              className="w-full h-full object-cover" 
+                              referrerPolicy="no-referrer" 
+                              loading="lazy"
+                            />
                           </div>
                         )}
 
@@ -589,7 +595,13 @@ export default function CustomerMenu() {
                     <div key={`${item.id}-${item.selectedType}-${idx}`} className="flex gap-4 items-center bg-gray-50 p-4 rounded-2xl border-2 border-black/5">
                       {item.image && (
                         <div className="w-16 h-16 rounded-xl overflow-hidden border border-black/10 shrink-0">
-                          <img src={item.image} alt={item.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                          <img 
+                            src={item.image} 
+                            alt={item.name} 
+                            className="w-full h-full object-cover" 
+                            referrerPolicy="no-referrer" 
+                            loading="lazy"
+                          />
                         </div>
                       )}
                       <div className="flex-1">
