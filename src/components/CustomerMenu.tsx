@@ -3,6 +3,7 @@ import { Category, MenuItem, Order } from '../types';
 import { Coffee, Info, ChevronRight, ShoppingBag, X, Plus, Minus, Trash2, History, CreditCard, RefreshCw, ClipboardList, Clock } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
+import { apiFetch } from '../lib/api';
 
 interface CartItem extends MenuItem {
   quantity: number;
@@ -67,13 +68,13 @@ export default function CustomerMenu() {
   };
 
   const fetchOrders = () => {
-    fetch(`/api/orders?customerId=${customerId}`)
+    apiFetch(`/api/orders?customerId=${customerId}`)
       .then(res => res.json())
       .then(data => setOrders(data));
   };
 
   useEffect(() => {
-    fetch('/api/menu')
+    apiFetch('/api/menu')
       .then(res => res.json())
       .then(data => {
         setMenu(data);
@@ -131,7 +132,7 @@ export default function CustomerMenu() {
     if (cart.length === 0) return;
     setIsSubmittingOrder(true);
     try {
-      const res = await fetch('/api/orders', {
+      const res = await apiFetch('/api/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -160,7 +161,7 @@ export default function CustomerMenu() {
   };
 
   const handlePay = async (orderId: number) => {
-    await fetch(`/api/orders/${orderId}/pay`, { method: 'PUT' });
+    await apiFetch(`/api/orders/${orderId}/pay`, { method: 'PUT' });
     fetchOrders();
   };
 
@@ -285,7 +286,13 @@ export default function CustomerMenu() {
                         
                         {item.image && (
                           <div className="relative w-full aspect-video rounded-xl overflow-hidden mb-4 border border-black/10 group-hover:border-white/20 transition-colors">
-                            <img src={item.image} alt={item.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                            <img 
+                              src={item.image} 
+                              alt={item.name} 
+                              className="w-full h-full object-cover" 
+                              referrerPolicy="no-referrer" 
+                              loading="lazy"
+                            />
                           </div>
                         )}
 
@@ -588,7 +595,13 @@ export default function CustomerMenu() {
                     <div key={`${item.id}-${item.selectedType}-${idx}`} className="flex gap-4 items-center bg-gray-50 p-4 rounded-2xl border-2 border-black/5">
                       {item.image && (
                         <div className="w-16 h-16 rounded-xl overflow-hidden border border-black/10 shrink-0">
-                          <img src={item.image} alt={item.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                          <img 
+                            src={item.image} 
+                            alt={item.name} 
+                            className="w-full h-full object-cover" 
+                            referrerPolicy="no-referrer" 
+                            loading="lazy"
+                          />
                         </div>
                       )}
                       <div className="flex-1">
