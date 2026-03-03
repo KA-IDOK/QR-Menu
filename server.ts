@@ -212,9 +212,26 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  const isProd = process.env.NODE_ENV === "production";
+
+  // Vite middleware for development - MOVE TO TOP
+  if (!isProd) {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+      root: process.cwd(),
+    });
+    app.use(vite.middlewares);
+  }
+
   app.use(express.json({ limit: '10mb' }));
 
   // API Routes
+  app.use((req, res, next) => {
+    console.log(`${req.method} ${req.url}`);
+    next();
+  });
+
   app.get("/api/menu", (req, res) => {
     const categories = db.prepare("SELECT * FROM categories").all();
     const menu = categories.map((cat: any) => {
@@ -356,30 +373,8 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  const isProd = process.env.NODE_ENV === "production";
-
-  // Vite middleware for development
-  if (!isProd) {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "custom",
-    });
-    app.use(vite.middlewares);
-    
-    app.get("*", async (req, res, next) => {
-      if (req.originalUrl.startsWith('/api')) {
-        return next();
-      }
-      try {
-        let template = fs.readFileSync(path.resolve("index.html"), "utf-8");
-        template = await vite.transformIndexHtml(req.originalUrl, template);
-        res.status(200).set({ "Content-Type": "text/html" }).end(template);
-      } catch (e) {
-        vite.ssrFixStacktrace(e as Error);
-        next(e);
-      }
-    });
-  } else {
+  // Vite middleware block removed from here
+  if (isProd) {
     app.use(express.static("dist"));
     app.get("*", (req, res) => {
       res.sendFile(path.resolve("dist/index.html"));
