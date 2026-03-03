@@ -367,16 +367,23 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    // Serve static files from dist
-    app.use(express.static("dist", {
-      setHeaders: (res, path) => {
-        if (path.endsWith('.js')) {
-          res.setHeader('Content-Type', 'application/javascript');
+    const distPath = path.resolve("dist");
+    console.log(`Serving static files from: ${distPath}`);
+    
+    // Serve static files from dist with explicit MIME types
+    app.use(express.static(distPath, {
+      setHeaders: (res, filePath) => {
+        const ext = path.extname(filePath).toLowerCase();
+        if (ext === '.js' || ext === '.mjs') {
+          res.setHeader('Content-Type', 'application/javascript; charset=UTF-8');
+        } else if (ext === '.css') {
+          res.setHeader('Content-Type', 'text/css; charset=UTF-8');
         }
       }
     }));
+
     app.get("*", (req, res) => {
-      res.sendFile(path.resolve("dist/index.html"));
+      res.sendFile(path.join(distPath, "index.html"));
     });
   }
 
