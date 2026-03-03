@@ -268,7 +268,11 @@ async function startServer() {
     const orders = db.prepare("SELECT * FROM orders WHERE user_email = ? ORDER BY created_at DESC").all(identifier);
     const ordersWithItems = orders.map((order: any) => {
       const items = db.prepare("SELECT * FROM order_items WHERE order_id = ?").all(order.id);
-      return { ...order, items };
+      const itemsWithAddons = items.map((item: any) => ({
+        ...item,
+        selected_addons: item.selected_addons ? JSON.parse(item.selected_addons) : []
+      }));
+      return { ...order, items: itemsWithAddons };
     });
     res.json(ordersWithItems);
   });

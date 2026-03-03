@@ -112,9 +112,9 @@ export default function CustomerMenu() {
     setPendingItem(null);
   };
 
-  const updateCartQuantity = (id: number, type: string, delta: number) => {
+  const updateCartQuantity = (id: number, type: string, addons: any[], delta: number) => {
     setCart(prev => prev.map(i => {
-      if (i.id === id && i.selectedType === type) {
+      if (i.id === id && i.selectedType === type && JSON.stringify(i.selectedAddons) === JSON.stringify(addons)) {
         const newQty = Math.max(0, i.quantity + delta);
         return { ...i, quantity: newQty };
       }
@@ -278,7 +278,7 @@ export default function CustomerMenu() {
                     {cat.items.map(item => (
                       <div 
                         key={item.id} 
-                        className={`group bg-white border-2 border-black p-6 rounded-2xl flex flex-col justify-between hover:bg-black hover:text-white transition-all duration-300 hover:shadow-2xl relative overflow-hidden ${!item.available ? 'opacity-60' : ''}`}
+                        className={`group bg-white border-2 border-black p-6 rounded-2xl flex flex-col justify-between transition-all duration-300 ${!item.available ? 'opacity-60' : ''}`}
                       >
                         {/* Decorative background element */}
                         <div className="absolute -right-4 -top-4 w-16 h-16 bg-black/5 rounded-full group-hover:bg-white/10 transition-colors" />
@@ -303,7 +303,7 @@ export default function CustomerMenu() {
                               {item.addons && JSON.parse(item.addons).length > 0 && (
                                 <span className={`text-white text-[8px] font-black px-2 py-1 rounded-full uppercase tracking-widest flex items-center gap-1 shadow-sm ${
                                   JSON.parse(item.addons).some((a: any) => a.available !== false) 
-                                    ? 'bg-[#4A3728]' 
+                                    ? 'bg-orange-500' 
                                     : 'bg-gray-400'
                                 }`}>
                                   <Plus size={8} strokeWidth={4} />
@@ -322,7 +322,7 @@ export default function CustomerMenu() {
                           {item.addons && JSON.parse(item.addons).length > 0 && (
                             <div className="flex flex-wrap gap-x-3 gap-y-1 mb-6">
                               {JSON.parse(item.addons).map((addon: any, idx: number) => (
-                                <span key={idx} className="text-[8px] font-black text-[#4A3728] uppercase tracking-widest">
+                                <span key={idx} className="text-[8px] font-black text-orange-500 uppercase tracking-widest">
                                   +{addon.name}
                                 </span>
                               ))}
@@ -352,7 +352,7 @@ export default function CustomerMenu() {
                                 className="flex flex-col items-start group/btn disabled:opacity-50"
                               >
                                 <span className="text-[8px] uppercase font-black opacity-40 mb-1 group-hover/btn:opacity-100">Hot</span>
-                                <div className="flex items-center gap-2 bg-[#4A3728]/10 px-3 py-2 rounded-xl group-hover/btn:bg-[#4A3728] group-hover/btn:text-white transition-all">
+                                <div className="flex items-center gap-2 bg-orange-500/10 px-3 py-2 rounded-xl group-hover/btn:bg-orange-500 group-hover/btn:text-white transition-all">
                                   <span className="text-lg font-black">₱{item.price_hot}</span>
                                   <Plus size={14} />
                                 </div>
@@ -365,7 +365,7 @@ export default function CustomerMenu() {
                                 className="flex flex-col items-start group/btn disabled:opacity-50"
                               >
                                 <span className="text-[8px] uppercase font-black opacity-40 mb-1 group-hover/btn:opacity-100">Cold</span>
-                                <div className="flex items-center gap-2 bg-[#4A3728]/10 px-3 py-2 rounded-xl group-hover/btn:bg-[#4A3728] group-hover/btn:text-white transition-all">
+                                <div className="flex items-center gap-2 bg-orange-500/10 px-3 py-2 rounded-xl group-hover/btn:bg-orange-500 group-hover/btn:text-white transition-all">
                                   <span className="text-lg font-black">₱{item.price_cold}</span>
                                   <Plus size={14} />
                                 </div>
@@ -450,7 +450,7 @@ export default function CustomerMenu() {
                             {!order.is_paid ? (
                               <button 
                                 onClick={() => handlePay(order.id)}
-                                className="bg-[#4A3728] text-white px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest hover:bg-[#3E2723] transition-all"
+                                className="bg-orange-500 text-white px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest hover:bg-orange-600 transition-all"
                               >
                                 Pay ₱{order.total}
                               </button>
@@ -585,10 +585,10 @@ export default function CustomerMenu() {
                   </div>
                 ) : (
                   cart.map((item, idx) => (
-                    <div key={`${item.id}-${item.selectedType}`} className="flex gap-4 items-center bg-gray-50 p-4 rounded-2xl border-2 border-black/5">
+                    <div key={`${item.id}-${item.selectedType}-${idx}`} className="flex gap-4 items-center bg-gray-50 p-4 rounded-2xl border-2 border-black/5">
                       {item.image && (
                         <div className="w-16 h-16 rounded-xl overflow-hidden border border-black/10 shrink-0">
-                          <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
+                          <img src={item.image} alt={item.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                         </div>
                       )}
                       <div className="flex-1">
@@ -606,21 +606,23 @@ export default function CustomerMenu() {
                       </div>
                       <div className="flex items-center gap-3 bg-white border-2 border-black rounded-xl p-1">
                         <button 
-                          onClick={() => updateCartQuantity(item.id, item.selectedType, -1)}
+                          onClick={() => updateCartQuantity(item.id, item.selectedType, item.selectedAddons, -1)}
                           className="p-1 hover:bg-black hover:text-white rounded-lg transition-all"
                         >
                           <Minus size={14} />
                         </button>
                         <span className="font-black text-sm w-4 text-center">{item.quantity}</span>
                         <button 
-                          onClick={() => updateCartQuantity(item.id, item.selectedType, 1)}
+                          onClick={() => updateCartQuantity(item.id, item.selectedType, item.selectedAddons, 1)}
                           className="p-1 hover:bg-black hover:text-white rounded-lg transition-all"
                         >
                           <Plus size={14} />
                         </button>
                       </div>
                       <button 
-                        onClick={() => setCart(prev => prev.filter(i => i.id !== item.id || i.selectedType !== item.selectedType))}
+                        onClick={() => setCart(prev => prev.filter(i => 
+                          !(i.id === item.id && i.selectedType === item.selectedType && JSON.stringify(i.selectedAddons) === JSON.stringify(item.selectedAddons))
+                        ))}
                         className="p-2 text-red-500 hover:bg-red-50 rounded-xl transition-all"
                         title="Remove from cart"
                       >
@@ -678,7 +680,7 @@ export default function CustomerMenu() {
               {pendingItem.item.addons && JSON.parse(pendingItem.item.addons).length > 0 && (
                 <div className="text-left mb-8 space-y-3">
                   <div className="flex items-center gap-2 mb-2">
-                    <div className="w-1 h-4 bg-[#4A3728] rounded-full" />
+                    <div className="w-1 h-4 bg-orange-500 rounded-full" />
                     <p className="text-[11px] font-black uppercase tracking-widest text-black">Would you like an add-on?</p>
                   </div>
                   <div className="max-h-40 overflow-y-auto pr-2 no-scrollbar space-y-2">
@@ -703,7 +705,7 @@ export default function CustomerMenu() {
                             !isAvailable 
                               ? 'border-gray-100 bg-gray-50 text-gray-300 cursor-not-allowed'
                               : isSelected 
-                                ? 'border-[#4A3728] bg-[#4A3728] text-white' 
+                                ? 'border-orange-500 bg-orange-500 text-white' 
                                 : 'border-black/5 bg-gray-50 text-black hover:border-black/20'
                           }`}
                         >

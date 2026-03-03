@@ -270,7 +270,7 @@ export default function AdminDashboard() {
                         <div className="flex gap-6 items-center relative z-10">
                           {item.image && (
                             <div className="w-20 h-20 rounded-xl overflow-hidden border-2 border-black shrink-0">
-                              <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
+                              <img src={item.image} alt={item.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                             </div>
                           )}
                           <div>
@@ -289,7 +289,7 @@ export default function AdminDashboard() {
                                       key={idx} 
                                       className={`text-[7px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full ${
                                         addon.available !== false 
-                                          ? 'text-[#4A3728] bg-[#4A3728]/5' 
+                                          ? 'text-orange-500 bg-orange-500/5' 
                                           : 'text-gray-400 bg-gray-100 line-through'
                                       }`}
                                     >
@@ -304,7 +304,7 @@ export default function AdminDashboard() {
                                   }}
                                   className={`self-start text-[8px] font-black px-2 py-1 rounded-full uppercase tracking-widest flex items-center gap-1 transition-all active:scale-95 border-2 ${
                                     JSON.parse(item.addons).some((a: any) => a.available !== false) 
-                                      ? 'bg-[#4A3728] text-white border-[#4A3728]' 
+                                      ? 'bg-orange-500 text-white border-orange-500' 
                                       : 'bg-gray-100 text-gray-400 border-gray-200'
                                   }`}
                                   title="Manage add-ons availability"
@@ -486,8 +486,8 @@ export default function AdminDashboard() {
                       <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Completed & paid transactions</p>
                     </div>
                   </div>
-                  <div className="bg-black text-white px-8 py-4 rounded-3xl border-4 border-[#4A3728] shadow-xl">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-[#4A3728] mb-1">Total Revenue</p>
+                  <div className="bg-black text-white px-8 py-4 rounded-3xl border-4 border-orange-500 shadow-xl">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-orange-500 mb-1">Total Revenue</p>
                     <p className="text-3xl font-black tracking-tighter">₱{orders.filter(o => o.is_paid && o.status === 'completed').reduce((sum, o) => sum + o.total, 0)}</p>
                   </div>
                 </div>
@@ -553,7 +553,7 @@ export default function AdminDashboard() {
             <h2 className="text-5xl font-black text-black uppercase tracking-tighter mb-6">Customer QR</h2>
             <p className="text-[#4A3728] font-bold uppercase tracking-widest text-xs mb-16">Scan to view the menu</p>
             
-            <div className="bg-black p-16 rounded-[3rem] shadow-2xl inline-block border-8 border-[#4A3728]">
+            <div className="bg-black p-16 rounded-[3rem] shadow-2xl inline-block border-8 border-orange-500">
               <div className="bg-white p-4 rounded-2xl">
                 <QRCodeSVG 
                   value={customerUrl} 
@@ -564,7 +564,7 @@ export default function AdminDashboard() {
               </div>
               <div className="mt-10">
                 <p className="text-2xl font-black text-white uppercase tracking-tighter mb-1">BODEGA COFFEE</p>
-                <p className="text-[10px] text-[#4A3728] font-black uppercase tracking-[0.4em]">Mandaue City</p>
+                <p className="text-[10px] text-orange-500 font-black uppercase tracking-[0.4em]">Mandaue City</p>
               </div>
             </div>
             
@@ -599,7 +599,7 @@ export default function AdminDashboard() {
               <div className="flex justify-between items-center mb-8">
                 <div>
                   <h2 className="text-2xl font-black uppercase tracking-tight">Manage Add-ons</h2>
-                  <p className="text-[10px] font-black uppercase tracking-widest text-[#4A3728] mt-1">{managingAddonsItem.name}</p>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-orange-500 mt-1">{managingAddonsItem.name}</p>
                 </div>
                 <button 
                   onClick={() => setManagingAddonsItem(null)}
@@ -622,13 +622,13 @@ export default function AdminDashboard() {
                     }}
                     className={`w-full flex justify-between items-center p-4 rounded-2xl border-2 transition-all active:scale-[0.98] ${
                       addon.available !== false 
-                        ? 'border-[#4A3728] bg-[#4A3728]/5 text-black' 
+                        ? 'border-orange-500 bg-orange-500/5 text-black' 
                         : 'border-gray-100 bg-gray-50 text-gray-400'
                     }`}
                   >
                     <div className="flex items-center gap-3">
                       <div className={`w-6 h-6 rounded-full flex items-center justify-center border-2 ${
-                        addon.available !== false ? 'border-[#4A3728] bg-[#4A3728] text-white' : 'border-gray-300 bg-white text-gray-300'
+                        addon.available !== false ? 'border-orange-500 bg-orange-500 text-white' : 'border-gray-300 bg-white text-gray-300'
                       }`}>
                         {addon.available !== false ? <Check size={12} strokeWidth={4} /> : <X size={12} strokeWidth={4} />}
                       </div>
@@ -690,7 +690,7 @@ export default function AdminDashboard() {
                   <div className="flex flex-col items-center gap-4 p-6 border-2 border-dashed border-black rounded-3xl bg-gray-50">
                     {editingItem.image ? (
                       <div className="relative w-full aspect-video rounded-2xl overflow-hidden border-2 border-black">
-                        <img src={editingItem.image} alt="Preview" className="w-full h-full object-cover" />
+                        <img src={editingItem.image} alt="Preview" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                         <button 
                           type="button"
                           onClick={() => setEditingItem({...editingItem, image: ''})}
