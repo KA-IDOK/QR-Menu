@@ -10,6 +10,21 @@ export default defineConfig(({mode}) => {
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
     },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes('node_modules')) {
+              if (id.includes('lucide-react')) return 'vendor-icons';
+              if (id.includes('motion')) return 'vendor-motion';
+              if (id.includes('qrcode.react')) return 'vendor-qr';
+              if (id.includes('@google/genai')) return 'vendor-ai';
+              return 'vendor';
+            }
+          },
+        },
+      },
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
