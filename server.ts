@@ -356,15 +356,25 @@ async function startServer() {
     res.json({ success: true });
   });
 
+  const isProd = process.env.NODE_ENV === "production";
+  console.log(`Starting server in ${isProd ? 'production' : 'development'} mode`);
+
   // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
+  if (!isProd) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static("dist"));
+    // Serve static files from dist
+    app.use(express.static("dist", {
+      setHeaders: (res, path) => {
+        if (path.endsWith('.js')) {
+          res.setHeader('Content-Type', 'application/javascript');
+        }
+      }
+    }));
     app.get("*", (req, res) => {
       res.sendFile(path.resolve("dist/index.html"));
     });
