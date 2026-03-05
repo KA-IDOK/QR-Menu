@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Category, MenuItem, Order } from '../types';
-import { Coffee, Info, ChevronRight, ShoppingBag, X, Plus, Minus, Trash2, History, CreditCard, RefreshCw, ClipboardList, Clock } from 'lucide-react';
+import { Coffee, Info, ChevronRight, ShoppingBag, X, Plus, Minus, Trash2, History, CreditCard, RefreshCw, ClipboardList, Clock, Edit3 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
+import { apiFetch } from '../lib/api';
 
 interface CartItem extends MenuItem {
   quantity: number;
@@ -67,13 +68,13 @@ export default function CustomerMenu() {
   };
 
   const fetchOrders = () => {
-    fetch(`/api/orders?customerId=${customerId}`)
+    apiFetch(`/api/orders?customerId=${customerId}`)
       .then(res => res.json())
       .then(data => setOrders(data));
   };
 
   useEffect(() => {
-    fetch('/api/menu')
+    apiFetch('/api/menu')
       .then(res => res.json())
       .then(data => {
         setMenu(data);
@@ -131,7 +132,7 @@ export default function CustomerMenu() {
     if (cart.length === 0) return;
     setIsSubmittingOrder(true);
     try {
-      const res = await fetch('/api/orders', {
+      const res = await apiFetch('/api/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -160,7 +161,7 @@ export default function CustomerMenu() {
   };
 
   const handlePay = async (orderId: number) => {
-    await fetch(`/api/orders/${orderId}/pay`, { method: 'PUT' });
+    await apiFetch(`/api/orders/${orderId}/pay`, { method: 'PUT' });
     fetchOrders();
   };
 
@@ -285,7 +286,13 @@ export default function CustomerMenu() {
                         
                         {item.image && (
                           <div className="relative w-full aspect-video rounded-xl overflow-hidden mb-4 border border-black/10 group-hover:border-white/20 transition-colors">
-                            <img src={item.image} alt={item.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                            <img 
+                              src={item.image} 
+                              alt={item.name} 
+                              className="w-full h-full object-cover" 
+                              referrerPolicy="no-referrer" 
+                              loading="lazy"
+                            />
                           </div>
                         )}
 
@@ -385,12 +392,22 @@ export default function CustomerMenu() {
       {/* Footer Info */}
       <footer className="max-w-4xl mx-auto px-6 py-16 text-center">
         <div className="h-px bg-black/20 mb-12" />
-        <div className="flex flex-col items-center gap-4">
-          <div className="w-12 h-12 rounded-full border-2 border-black flex items-center justify-center">
-            <Info className="w-6 h-6" />
+        <div className="flex flex-col items-center gap-6">
+          <div className="flex flex-col items-center gap-4">
+            <div className="w-12 h-12 rounded-full border-2 border-black flex items-center justify-center">
+              <Info className="w-6 h-6" />
+            </div>
+            <p className="text-[10px] font-black uppercase tracking-[0.4em]">Mandaue City • Bodega Coffee</p>
+            <p className="text-[9px] text-gray-400 font-medium uppercase mt-2">© 2026 Bodega Coffee Roasters</p>
           </div>
-          <p className="text-[10px] font-black uppercase tracking-[0.4em]">Mandaue City • Bodega Coffee</p>
-          <p className="text-[9px] text-gray-400 font-medium uppercase mt-2">© 2026 Bodega Coffee Roasters</p>
+          
+          <button 
+            onClick={() => setShowAdminModal(true)}
+            className="flex items-center gap-2 px-6 py-3 rounded-full border-2 border-black text-black text-[10px] font-black uppercase tracking-widest hover:bg-black hover:text-white transition-all active:scale-95"
+          >
+            <Edit3 className="w-4 h-4" />
+            Switch to Editor
+          </button>
         </div>
       </footer>
 
@@ -588,7 +605,13 @@ export default function CustomerMenu() {
                     <div key={`${item.id}-${item.selectedType}-${idx}`} className="flex gap-4 items-center bg-gray-50 p-4 rounded-2xl border-2 border-black/5">
                       {item.image && (
                         <div className="w-16 h-16 rounded-xl overflow-hidden border border-black/10 shrink-0">
-                          <img src={item.image} alt={item.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                          <img 
+                            src={item.image} 
+                            alt={item.name} 
+                            className="w-full h-full object-cover" 
+                            referrerPolicy="no-referrer" 
+                            loading="lazy"
+                          />
                         </div>
                       )}
                       <div className="flex-1">
