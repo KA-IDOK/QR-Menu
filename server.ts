@@ -3,8 +3,28 @@ import { createServer as createViteServer } from "vite";
 import Database from "better-sqlite3";
 import path from "path";
 import fs from "fs";
+import { fileURLToPath } from "url";
+import { createServer } from "http";
+import { Server } from "socket.io";
 
-const db = new Database("menu.db");
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+console.log("[SERVER] Module loading...");
+console.log("[SERVER] __dirname:", __dirname);
+console.log("[SERVER] process.cwd():", process.cwd());
+
+const dbPath = path.resolve(process.cwd(), "menu.db");
+console.log(`Initializing database at: ${dbPath}`);
+let db: any;
+try {
+  db = new Database(dbPath);
+  console.log("Database initialized successfully");
+} catch (err) {
+  console.error("FAILED TO INITIALIZE DATABASE:", err);
+  // Fallback to in-memory if file fails (though this shouldn't happen in this env)
+  db = new Database(":memory:");
+}
 
 // Initialize database
 db.exec(`
@@ -210,24 +230,82 @@ if (categoryCount.count === 0) {
 
 async function startServer() {
   const app = express();
+  const httpServer = createServer(app);
+  const io = new Server(httpServer, {
+    cors: {
+      origin: "*",
+      methods: ["GET", "POST"]
+    }
+  });
+
   const PORT = Number(process.env.PORT) || 3000;
+  const isProd = process.env.NODE_ENV === 'production';
+
+  // Helper to notify all clients of updates
+  const notifyUpdate = (type: string, data?: any) => {
+    console.log(`[SOCKET] Notifying update: ${type}`);
+    io.emit(type, data);
+  };
+
+  // Socket.io connection
+  io.on("connection", (socket) => {
+    console.log(`[SOCKET] Client connected: ${socket.id}`);
+  });
+
+  console.log(`--- Server Starting ---`);
+  console.log(`NODE_ENV: ${process.env.NODE_ENV}`);
+  console.log(`isProd: ${isProd}`);
+  console.log(`Port: ${PORT}`);
+  console.log(`Working Directory: ${process.cwd()}`);
+  console.log(`-----------------------`);
+
+  // Global Request Logger - MUST BE FIRST
+  app.use((req, res, next) => {
+    const logLine = `[GLOBAL LOG] ${new Date().toISOString()} | ${req.method} ${req.url} | Origin: ${req.headers.origin}\n`;
+    console.log(logLine.trim());
+    try {
+      fs.appendFileSync(path.resolve(process.cwd(), "server.log"), logLine);
+    } catch (e) {}
+    next();
+  });
+
+  // API Routes - Move as high as possible
+  app.get(["/api/menu", "/api/menu/"], (req, res) => {
+    console.log(`HIT: /api/menu | Method: ${req.method} | URL: ${req.url}`);
+    try {
+      const categories = db.prepare("SELECT * FROM categories").all();
+      const menu = categories.map((cat: any) => {
+        const items = db.prepare("SELECT * FROM items WHERE category_id = ?").all(cat.id);
+        return { ...cat, items };
+      });
+      console.log(`[API] /menu returning ${menu.length} categories`);
+      res.json(menu);
+    } catch (err) {
+      console.error("API Error /menu:", err);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/health", (req, res) => {
+    console.log("HIT: /api/health");
+    res.json({ status: "ok", time: new Date().toISOString() });
+  });
 
   app.use(express.json({ limit: '10mb' }));
 
-  // API Routes
-  app.get("/api/menu", (req, res) => {
-    const categories = db.prepare("SELECT * FROM categories").all();
-    const menu = categories.map((cat: any) => {
-      const items = db.prepare("SELECT * FROM items WHERE category_id = ?").all(cat.id);
-      return { ...cat, items };
-    });
-    res.json(menu);
+  // API Cache Control
+  app.use("/api", (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    next();
   });
 
   app.post("/api/categories", (req, res) => {
     const { name } = req.body;
     try {
       const info = db.prepare("INSERT INTO categories (name) VALUES (?)").run(name);
+      notifyUpdate("menu_updated");
       res.json({ id: info.lastInsertRowid, name });
     } catch (e) {
       res.status(400).json({ error: "Category already exists" });
@@ -240,6 +318,7 @@ async function startServer() {
       INSERT INTO items (category_id, name, price_hot, price_cold, price_fixed, description, image, addons)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(category_id, name, price_hot, price_cold, price_fixed, description, image, addons);
+    notifyUpdate("menu_updated");
     res.json({ id: info.lastInsertRowid, ...req.body });
   });
 
@@ -251,11 +330,13 @@ async function startServer() {
       SET name = ?, price_hot = ?, price_cold = ?, price_fixed = ?, description = ?, available = ?, image = ?, addons = ?
       WHERE id = ?
     `).run(name, price_hot, price_cold, price_fixed, description, available, image, addons, id);
+    notifyUpdate("menu_updated");
     res.json({ success: true });
   });
 
   app.delete("/api/items/:id", (req, res) => {
     db.prepare("DELETE FROM items WHERE id = ?").run(req.params.id);
+    notifyUpdate("menu_updated");
     res.json({ success: true });
   });
 
@@ -297,11 +378,13 @@ async function startServer() {
     });
 
     const orderId = transaction({ user_email, total, items });
+    notifyUpdate("order_created", { id: orderId, user_email });
     res.json({ id: orderId, success: true });
   });
 
   app.put("/api/orders/:id/pay", (req, res) => {
     db.prepare("UPDATE orders SET is_paid = 1, status = 'completed' WHERE id = ?").run(req.params.id);
+    notifyUpdate("order_updated", { id: req.params.id, status: 'completed', is_paid: 1 });
     res.json({ success: true });
   });
 
@@ -322,6 +405,7 @@ async function startServer() {
     const { id } = req.params;
     const { status, is_paid } = req.body;
     db.prepare("UPDATE orders SET status = ?, is_paid = ? WHERE id = ?").run(status, is_paid, id);
+    notifyUpdate("order_updated", { id, status, is_paid });
     res.json({ success: true });
   });
 
@@ -353,20 +437,60 @@ async function startServer() {
     });
 
     transaction(categories);
+    notifyUpdate("menu_updated");
     res.json({ success: true });
   });
 
+  // Catch-all for API routes to prevent falling through to Vite/SPA fallback
+  app.all("/api/*", (req, res) => {
+    console.log(`API 404: ${req.method} ${req.url}`);
+    res.status(404).json({ 
+      error: "API route not found", 
+      method: req.method, 
+      url: req.url 
+    });
+  });
+
   // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
+  if (!isProd) {
+    console.log("Using Vite middleware for development...");
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { 
+        middlewareMode: true,
+        watch: {
+          // AI Studio specific: watch is often restricted
+          usePolling: true,
+          interval: 100
+        }
+      },
       appType: "spa",
     });
+    
+    // Log requests that reach Vite
+    app.use((req, res, next) => {
+      if (req.url.startsWith('/api')) {
+        console.warn(`[WARN] API request reached Vite middleware: ${req.method} ${req.url}`);
+      }
+      next();
+    });
+
     app.use(vite.middlewares);
   } else {
-    app.use(express.static("dist"));
+    const distPath = path.resolve(process.cwd(), "dist");
+    console.log(`Serving static files from: ${distPath}`);
+    
+    if (!fs.existsSync(distPath)) {
+      console.error("CRITICAL: 'dist' folder not found! Did you run 'npm run build'?");
+    }
+
+    app.use(express.static(distPath));
     app.get("*", (req, res) => {
-      res.sendFile(path.resolve("dist/index.html"));
+      const indexPath = path.resolve(distPath, "index.html");
+      if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+      } else {
+        res.status(404).send("index.html not found in dist folder. Please check your build.");
+      }
     });
   }
 
@@ -492,9 +616,14 @@ async function startServer() {
     })();
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+  console.log("Vite middleware and API routes configured. Starting listener...");
+  httpServer.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on http://0.0.0.0:${PORT}`);
   });
 }
 
-startServer();
+console.log("[SERVER] Initializing startServer()...");
+startServer().catch(err => {
+  console.error("[SERVER] FATAL ERROR DURING STARTUP:", err);
+  process.exit(1);
+});

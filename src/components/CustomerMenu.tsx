@@ -4,6 +4,7 @@ import { Coffee, Info, ChevronRight, ShoppingBag, X, Plus, Minus, Trash2, Histor
 import { motion, AnimatePresence } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '../lib/api';
+import socket from '../lib/socket';
 
 interface CartItem extends MenuItem {
   quantity: number;
@@ -69,21 +70,59 @@ export default function CustomerMenu() {
 
   const fetchOrders = () => {
     apiFetch(`/api/orders?customerId=${customerId}`)
-      .then(res => res.json())
-      .then(data => setOrders(data));
+      .then(res => {
+        if (!res.ok) throw new Error(`Failed to fetch orders: ${res.status}`);
+        return res.json();
+      })
+      .then(data => setOrders(data))
+      .catch(err => console.error("Error fetching orders:", err));
   };
 
   useEffect(() => {
+    console.log("Fetching menu...");
     apiFetch('/api/menu')
-      .then(res => res.json())
+      .then(res => {
+        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+        return res.json();
+      })
       .then(data => {
+        console.log("Menu fetched:", data);
         setMenu(data);
-        // Default to "All" (null)
         setActiveCategory(null);
         setLoading(false);
+      })
+      .catch(err => {
+        console.error("Failed to fetch menu:", err);
+        setLoading(false); // Stop loading even on error to show empty state or error
       });
     fetchOrders();
-  }, []);
+
+    // Socket.io listeners for real-time updates
+    socket.on('order_created', (data) => {
+      if (data.user_email === customerId) {
+        console.log('[SOCKET] Your order was created, fetching...');
+        fetchOrders();
+      }
+    });
+
+    socket.on('order_updated', () => {
+      console.log('[SOCKET] Order updated, fetching...');
+      fetchOrders();
+    });
+
+    socket.on('menu_updated', () => {
+      console.log('[SOCKET] Menu updated, fetching...');
+      apiFetch('/api/menu')
+        .then(res => res.json())
+        .then(data => setMenu(data));
+    });
+
+    return () => {
+      socket.off('order_created');
+      socket.off('order_updated');
+      socket.off('menu_updated');
+    };
+  }, [customerId]);
 
   const addToCart = (item: MenuItem, type: 'hot' | 'cold' | 'fixed', price: number) => {
     setPendingItem({ item, type, price, selectedAddons: [] });
@@ -186,9 +225,14 @@ export default function CustomerMenu() {
             {/* Logo Space - Triple click for Admin */}
             <div 
               onClick={handleLogoClick}
-              className="w-10 h-10 bg-white rounded-full flex items-center justify-center shrink-0 shadow-lg cursor-pointer active:scale-95 hover:bg-black border-2 border-transparent hover:border-white transition-all group"
+              className="w-12 h-12 bg-black rounded-full flex items-center justify-center shrink-0 shadow-lg cursor-pointer active:scale-95 border-2 border-white/20 hover:border-white transition-all overflow-hidden"
             >
-              <Coffee className="text-black w-6 h-6 group-hover:text-white transition-colors" />
+              <img 
+                src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQdH0i179miZPzF_jDEwbvpE4KEjrK83VO2HA&s" 
+                alt="Bodega Logo" 
+                className="w-full h-full object-cover"
+                referrerPolicy="no-referrer"
+              />
             </div>
             <div className="text-left flex-1">
               <h1 className="text-2xl font-black tracking-tighter text-white uppercase leading-none">BODEGA</h1>

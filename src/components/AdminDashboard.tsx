@@ -7,6 +7,7 @@ import { extractMenuFromImage } from '../services/geminiService';
 import { motion, AnimatePresence } from 'motion/react';
 import { Order } from '../types';
 import { apiFetch } from '../lib/api';
+import socket from '../lib/socket';
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
@@ -16,6 +17,7 @@ export default function AdminDashboard() {
   const [isSeeding, setIsSeeding] = useState(false);
   const [view, setView] = useState<'items' | 'qr' | 'orders'>('items');
   const [activeAdminCategory, setActiveAdminCategory] = useState<number | null>(null);
+  const [isConnected, setIsConnected] = useState(socket.connected);
   
   // Editor State
   const [editingItem, setEditingItem] = useState<Partial<MenuItem> | null>(null);
@@ -38,6 +40,36 @@ export default function AdminDashboard() {
   useEffect(() => {
     fetchMenu();
     fetchOrders();
+
+    const onConnect = () => setIsConnected(true);
+    const onDisconnect = () => setIsConnected(false);
+
+    socket.on('connect', onConnect);
+    socket.on('disconnect', onDisconnect);
+
+    // Socket.io listeners for real-time updates
+    socket.on('order_created', () => {
+      console.log('[SOCKET] New order received, fetching...');
+      fetchOrders();
+    });
+
+    socket.on('order_updated', () => {
+      console.log('[SOCKET] Order updated, fetching...');
+      fetchOrders();
+    });
+
+    socket.on('menu_updated', () => {
+      console.log('[SOCKET] Menu updated, fetching...');
+      fetchMenu();
+    });
+
+    return () => {
+      socket.off('connect', onConnect);
+      socket.off('disconnect', onDisconnect);
+      socket.off('order_created');
+      socket.off('order_updated');
+      socket.off('menu_updated');
+    };
   }, []);
 
   useEffect(() => {
@@ -161,14 +193,25 @@ export default function AdminDashboard() {
         <div className="mb-12 flex items-center gap-3">
           <div 
             onClick={() => navigate('/')}
-            className="w-10 h-10 bg-white rounded-full flex items-center justify-center cursor-pointer hover:bg-black border-2 border-transparent hover:border-white active:scale-95 transition-all shadow-lg group"
+            className="w-12 h-12 bg-white rounded-full flex items-center justify-center cursor-pointer border-2 border-transparent hover:border-white active:scale-95 transition-all shadow-lg overflow-hidden"
           >
-            <Coffee className="text-black w-6 h-6 group-hover:text-white transition-colors" />
+            <img 
+              src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQdH0i179miZPzF_jDEwbvpE4KEjrK83VO2HA&s" 
+              alt="Bodega Logo" 
+              className="w-full h-full object-cover"
+              referrerPolicy="no-referrer"
+            />
           </div>
           <h1 className="text-xl font-black tracking-tighter uppercase">Bodega Admin</h1>
         </div>
         
         <nav className="space-y-2 flex-1">
+          <div className="px-4 py-2 mb-4 flex items-center gap-2">
+            <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+            <span className="text-[10px] uppercase tracking-widest font-bold text-white/50">
+              {isConnected ? 'Live Connection' : 'Offline'}
+            </span>
+          </div>
           <button 
             onClick={() => setView('items')}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${view === 'items' ? 'bg-white text-black shadow-lg' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
