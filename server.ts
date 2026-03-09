@@ -53,6 +53,7 @@ db.exec(`
     total INTEGER NOT NULL,
     status TEXT DEFAULT 'pending',
     is_paid INTEGER DEFAULT 0,
+    payment_method TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -84,127 +85,154 @@ try {
   db.exec("ALTER TABLE order_items ADD COLUMN selected_addons TEXT");
 } catch (e) {}
 
-// Seed initial data if empty
-const categoryCount = db.prepare("SELECT COUNT(*) as count FROM categories").get() as { count: number };
-if (categoryCount.count === 0) {
+// Migration: Add payment_method column if it doesn't exist
+try {
+  db.exec("ALTER TABLE orders ADD COLUMN payment_method TEXT");
+} catch (e) {}
+
+// Migration: Populate default addons for items that have none
+try {
   const beverageAddons = JSON.stringify([
-    { name: "Hazelnut / Vanilla", price: 30, available: true },
-    { name: "White Chocolate", price: 30, available: true },
+    { name: "Hazelnut", price: 30, available: true },
+    { name: "Vanilla", price: 30, available: true },
+    { name: "White chocolate", price: 30, available: true },
     { name: "Espresso Shot", price: 80, available: true }
   ]);
   const foodAddons = JSON.stringify([
     { name: "Rice", price: 30, available: true }
   ]);
-  const sodaAddons = JSON.stringify([
+
+  // Update items in categories that are NOT QUICK BITES
+  db.prepare(`
+    UPDATE items SET addons = ? 
+    WHERE category_id NOT IN (SELECT id FROM categories WHERE name = 'QUICK BITES')
+  `).run(beverageAddons);
+
+  // Update QUICK BITES items
+  db.prepare(`
+    UPDATE items SET addons = ? 
+    WHERE category_id IN (SELECT id FROM categories WHERE name = 'QUICK BITES')
+  `).run(foodAddons);
+} catch (e) {
+  console.error("Migration error (addons):", e);
+}
+
+// Seed initial data if empty
+const categoryCount = db.prepare("SELECT COUNT(*) as count FROM categories").get() as { count: number };
+if (categoryCount.count === 0) {
+  const beverageAddons = JSON.stringify([
     { name: "Hazelnut", price: 30, available: true },
     { name: "Vanilla", price: 30, available: true },
     { name: "White chocolate", price: 30, available: true },
     { name: "Espresso Shot", price: 80, available: true }
+  ]);
+  const foodAddons = JSON.stringify([
+    { name: "Rice", price: 30, available: true }
   ]);
 
   const seedData = [
     {
       name: "SPECIALTY ESPRESSO BEVERAGES",
       items: [
-        { name: "Brewed Coffee", price_hot: 100, price_cold: 120 },
-        { name: "White Chocolate Mocha", price_cold: 180 },
-        { name: "Caramel Macchiato", price_cold: 180 },
-        { name: "Classic Spanish Latte", price_hot: 175, price_cold: 200 },
-        { name: "Seasalt Caramel Latte", price_hot: 175, price_cold: 200 },
-        { name: "Hazelnut Latte", price_hot: 175, price_cold: 200 }
+        { name: "Brewed Coffee", price_hot: 100, price_cold: 120, image: "https://images.unsplash.com/photo-1541167760496-1628856ab772?w=800&auto=format&fit=crop" },
+        { name: "White Chocolate Mocha", price_cold: 180, image: "https://images.unsplash.com/photo-1572442388796-11668a67e53d?w=800&auto=format&fit=crop" },
+        { name: "Caramel Macchiato", price_cold: 180, image: "https://images.unsplash.com/photo-1485808191679-5f86510681a2?w=800&auto=format&fit=crop" },
+        { name: "Classic Spanish Latte", price_hot: 175, price_cold: 200, image: "https://images.unsplash.com/photo-1551030173-122adba81f3a?w=800&auto=format&fit=crop" },
+        { name: "Seasalt Caramel Latte", price_hot: 175, price_cold: 200, image: "https://images.unsplash.com/photo-1594133282413-62006396771f?w=800&auto=format&fit=crop" },
+        { name: "Hazelnut Latte", price_hot: 175, price_cold: 200, image: "https://images.unsplash.com/photo-1461023058943-07fcbe16d735?w=800&auto=format&fit=crop" }
       ]
     },
     {
       name: "BODEGA X LINEAR COFFEE ROASTERS",
       items: [
-        { name: "Filtered Coffee", price_fixed: 100 },
-        { name: "Espresso / Black", price_fixed: 100 },
-        { name: "White", price_fixed: 100 },
-        { name: "White Brew", price_fixed: 120 },
-        { name: "Cold Brew", price_fixed: 120 }
+        { name: "Filtered Coffee", price_fixed: 100, image: "https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?w=800&auto=format&fit=crop" },
+        { name: "Espresso / Black", price_fixed: 100, image: "https://images.unsplash.com/photo-1510591509098-f4fdc6d0ff04?w=800&auto=format&fit=crop" },
+        { name: "White", price_fixed: 100, image: "https://images.unsplash.com/photo-1517701604599-bb29b565090c?w=800&auto=format&fit=crop" },
+        { name: "White Brew", price_fixed: 120, image: "https://images.unsplash.com/photo-1461023058943-07fcbe16d735?w=800&auto=format&fit=crop" },
+        { name: "Cold Brew", price_fixed: 120, image: "https://images.unsplash.com/photo-1517701553060-0a3405d58280?w=800&auto=format&fit=crop" }
       ]
     },
     {
       name: "NON-ESPRESSO BEVERAGES",
       items: [
-        { name: "Matcha Latte", price_fixed: 180 },
-        { name: "Ube Latte", price_fixed: 180 },
-        { name: "Strawberry Matcha Latte", price_fixed: 200 },
-        { name: "Ube Matcha Latte", price_fixed: 200 }
+        { name: "Matcha Latte", price_fixed: 180, image: "https://images.unsplash.com/photo-1515823662273-ad9525e58846?w=800&auto=format&fit=crop" },
+        { name: "Ube Latte", price_fixed: 180, image: "https://images.unsplash.com/photo-1578314675249-a6910f80cc4e?w=800&auto=format&fit=crop" },
+        { name: "Strawberry Matcha Latte", price_fixed: 200, image: "https://images.unsplash.com/photo-1594631252845-29fc4cc8cde9?w=800&auto=format&fit=crop" },
+        { name: "Ube Matcha Latte", price_fixed: 200, image: "https://images.unsplash.com/photo-1578314675249-a6910f80cc4e?w=800&auto=format&fit=crop" }
       ]
     },
     {
       name: "HOT TEA",
       items: [
-        { name: "Pure Chamomile", price_fixed: 120 },
-        { name: "English Breakfast", price_fixed: 120 },
-        { name: "Green Tea", price_fixed: 120 }
+        { name: "Pure Chamomile", price_fixed: 120, image: "https://images.unsplash.com/photo-1594631252845-29fc4cc8cde9?w=800&auto=format&fit=crop" },
+        { name: "English Breakfast", price_fixed: 120, image: "https://images.unsplash.com/photo-1594631252845-29fc4cc8cde9?w=800&auto=format&fit=crop" },
+        { name: "Green Tea", price_fixed: 120, image: "https://images.unsplash.com/photo-1594631252845-29fc4cc8cde9?w=800&auto=format&fit=crop" }
       ]
     },
     {
       name: "COMFORT FOOD",
       items: [
-        { name: "Siomai Rice Bowl", price_fixed: 149 },
-        { name: "Longganisa with Egg", price_fixed: 179 },
-        { name: "Bistek Tagalog", price_fixed: 199 },
-        { name: "Burger Steak", price_fixed: 249 },
-        { name: "Chicken Torikatsu", price_fixed: 249 },
-        { name: "Spam with Egg", price_fixed: 249 }
+        { name: "Siomai Rice Bowl", price_fixed: 149, image: "https://images.unsplash.com/photo-1563379091339-03b21bc4a4f8?w=800&auto=format&fit=crop" },
+        { name: "Longganisa with Egg", price_fixed: 179, image: "https://images.unsplash.com/photo-1585032226651-759b368d7246?w=800&auto=format&fit=crop" },
+        { name: "Bistek Tagalog", price_fixed: 199, image: "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=800&auto=format&fit=crop" },
+        { name: "Burger Steak", price_fixed: 249, image: "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=800&auto=format&fit=crop" },
+        { name: "Chicken Torikatsu", price_fixed: 249, image: "https://images.unsplash.com/photo-1562607378-27b956467629?w=800&auto=format&fit=crop" },
+        { name: "Spam with Egg", price_fixed: 249, image: "https://images.unsplash.com/photo-1551782450-a2132b4ba21d?w=800&auto=format&fit=crop" }
       ]
     },
     {
       name: "SWEET TREATS",
       items: [
-        { name: "Chocolate Chip Cookie", price_fixed: 90 },
-        { name: "Red Velvet Cookie", price_fixed: 90 },
-        { name: "Biscoff Cookie", price_fixed: 90 },
-        { name: "Mango Graham", price_fixed: 170 },
-        { name: "Tiramisu", price_fixed: 190 },
-        { name: "Basque Burnt Cheesecake", price_fixed: 190 }
+        { name: "Chocolate Chip Cookie", price_fixed: 90, image: "https://images.unsplash.com/photo-1499636136210-6f4ee915583e?w=800&auto=format&fit=crop" },
+        { name: "Red Velvet Cookie", price_fixed: 90, image: "https://images.unsplash.com/photo-1616733148914-29d97a5da3c1?w=800&auto=format&fit=crop" },
+        { name: "Biscoff Cookie", price_fixed: 90, image: "https://images.unsplash.com/photo-1499636136210-6f4ee915583e?w=800&auto=format&fit=crop" },
+        { name: "Mango Graham", price_fixed: 170, image: "https://images.unsplash.com/photo-1551024601-bec78aea704b?w=800&auto=format&fit=crop" },
+        { name: "Tiramisu", price_fixed: 190, image: "https://images.unsplash.com/photo-1571877227200-a0d98ea607e9?w=800&auto=format&fit=crop" },
+        { name: "Basque Burnt Cheesecake", price_fixed: 190, image: "https://images.unsplash.com/photo-1533134242443-d4fd215305ad?w=800&auto=format&fit=crop" }
       ]
     },
     {
       name: "JUICES & FRUIT TEAS",
       items: [
-        { name: "Green Apple Fruit Tea", price_fixed: 150 },
-        { name: "Melon Fruit Tea", price_fixed: 150 },
-        { name: "Hibiscus Lemonade", price_fixed: 150 },
-        { name: "Green Apple Yakult", price_fixed: 190 },
-        { name: "Melon Yakult", price_fixed: 190 }
+        { name: "Green Apple Fruit Tea", price_fixed: 150, image: "https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=800&auto=format&fit=crop" },
+        { name: "Melon Fruit Tea", price_fixed: 150, image: "https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=800&auto=format&fit=crop" },
+        { name: "Hibiscus Lemonade", price_fixed: 150, image: "https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=800&auto=format&fit=crop" },
+        { name: "Green Apple Yakult", price_fixed: 190, image: "https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=800&auto=format&fit=crop" },
+        { name: "Melon Yakult", price_fixed: 190, image: "https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=800&auto=format&fit=crop" }
       ]
     },
     {
       name: "SMOOTHIES & FRAPPES",
       items: [
-        { name: "Blueberry Smoothie", price_fixed: 160 },
-        { name: "Strawberry Smoothie", price_fixed: 160 },
-        { name: "Java Chip Frappe", price_fixed: 200 }
+        { name: "Blueberry Smoothie", price_fixed: 160, image: "https://images.unsplash.com/photo-1553530209-92264097c64b?w=800&auto=format&fit=crop" },
+        { name: "Strawberry Smoothie", price_fixed: 160, image: "https://images.unsplash.com/photo-1553530209-92264097c64b?w=800&auto=format&fit=crop" },
+        { name: "Java Chip Frappe", price_fixed: 200, image: "https://images.unsplash.com/photo-1572490122747-3968b75cc699?w=800&auto=format&fit=crop" }
       ]
     },
     {
       name: "SODA POP",
       items: [
-        { name: "Strawberry Soda", price_fixed: 160, addons: sodaAddons },
-        { name: "Blueberry Soda", price_fixed: 160, addons: sodaAddons },
-        { name: "Butterfly Pea Peach Soda", price_fixed: 200, addons: sodaAddons }
+        { name: "Strawberry Soda", price_fixed: 160, addons: beverageAddons, image: "https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=800&auto=format&fit=crop" },
+        { name: "Blueberry Soda", price_fixed: 160, addons: beverageAddons, image: "https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=800&auto=format&fit=crop" },
+        { name: "Butterfly Pea Peach Soda", price_fixed: 200, addons: beverageAddons, image: "https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=800&auto=format&fit=crop" }
       ]
     },
     {
       name: "QUICK BITES",
       items: [
-        { name: "Siopao", price_fixed: 59, addons: foodAddons },
-        { name: "Fries (BBQ / Sour Cream)", price_fixed: 159, addons: foodAddons },
-        { name: "Chicken Nuggets", price_fixed: 179, addons: foodAddons },
-        { name: "Korean Ramen with Egg", price_fixed: 199, addons: foodAddons },
-        { name: "Mama's Lasagna with Bread", price_fixed: 199, addons: foodAddons }
+        { name: "Siopao", price_fixed: 59, addons: foodAddons, image: "https://images.unsplash.com/photo-1563379091339-03b21bc4a4f8?w=800&auto=format&fit=crop" },
+        { name: "Fries (BBQ / Sour Cream)", price_fixed: 159, addons: foodAddons, image: "https://images.unsplash.com/photo-1573016608294-d447906a3a29?w=800&auto=format&fit=crop" },
+        { name: "Chicken Nuggets", price_fixed: 179, addons: foodAddons, image: "https://images.unsplash.com/photo-1562607378-27b956467629?w=800&auto=format&fit=crop" },
+        { name: "Korean Ramen with Egg", price_fixed: 199, addons: foodAddons, image: "https://images.unsplash.com/photo-1569718212165-3a8278d5f624?w=800&auto=format&fit=crop" },
+        { name: "Mama's Lasagna with Bread", price_fixed: 199, addons: foodAddons, image: "https://images.unsplash.com/photo-1551183053-bf91a1d81141?w=800&auto=format&fit=crop" }
       ]
     }
   ];
 
   const insertCategory = db.prepare("INSERT INTO categories (name) VALUES (?)");
   const insertItem = db.prepare(`
-    INSERT INTO items (category_id, name, price_hot, price_cold, price_fixed, addons)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO items (category_id, name, price_hot, price_cold, price_fixed, image, addons)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
 
   db.transaction(() => {
@@ -212,8 +240,8 @@ if (categoryCount.count === 0) {
       const catInfo = insertCategory.run(cat.name);
       for (const item of cat.items) {
         const i = item as any;
-        // Use foodAddons for QUICK BITES, sodaAddons for others
-        const itemAddons = cat.name === "QUICK BITES" ? foodAddons : sodaAddons;
+        // Use foodAddons for QUICK BITES, beverageAddons for others
+        const itemAddons = cat.name === "QUICK BITES" ? foodAddons : beverageAddons;
         
         insertItem.run(
           catInfo.lastInsertRowid,
@@ -221,6 +249,7 @@ if (categoryCount.count === 0) {
           i.price_hot || null,
           i.price_cold || null,
           i.price_fixed || null,
+          i.image || null,
           itemAddons
         );
       }
@@ -359,16 +388,16 @@ async function startServer() {
   });
 
   app.post("/api/orders", (req, res) => {
-    const { user_email, total, items } = req.body;
+    const { user_email, total, items, payment_method } = req.body;
     
-    const insertOrder = db.prepare("INSERT INTO orders (user_email, total) VALUES (?, ?)");
+    const insertOrder = db.prepare("INSERT INTO orders (user_email, total, payment_method) VALUES (?, ?, ?)");
     const insertOrderItem = db.prepare(`
       INSERT INTO order_items (order_id, menu_item_id, name, price, quantity, type, selected_addons)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
 
     const transaction = db.transaction((orderData) => {
-      const info = insertOrder.run(orderData.user_email, orderData.total);
+      const info = insertOrder.run(orderData.user_email, orderData.total, orderData.payment_method);
       const orderId = info.lastInsertRowid;
       for (const item of orderData.items) {
         const selectedAddonsJson = item.selectedAddons ? JSON.stringify(item.selectedAddons) : null;
@@ -377,7 +406,7 @@ async function startServer() {
       return orderId;
     });
 
-    const orderId = transaction({ user_email, total, items });
+    const orderId = transaction({ user_email, total, items, payment_method });
     notifyUpdate("order_created", { id: orderId, user_email });
     res.json({ id: orderId, success: true });
   });
@@ -494,127 +523,8 @@ async function startServer() {
     });
   }
 
-  // Auto-seed if empty
-  const count = db.prepare("SELECT COUNT(*) as count FROM categories").get() as any;
-  if (count.count === 0) {
-    console.log("Database empty, seeding initial menu...");
-    const initialData = [
-      {
-        name: "Specialty Espresso",
-        items: [
-          { name: "Brewed Coffee", price: { hot: 100, cold: 120 } },
-          { name: "White Chocolate Mocha", price: { cold: 180 } },
-          { name: "Caramel Macchiato", price: { cold: 180 } },
-          { name: "Classic Spanish Latte", price: { hot: 175, cold: 200 } },
-          { name: "Seasalt Caramel Latte", price: { hot: 175, cold: 200 } },
-          { name: "Hazelnut Latte", price: { hot: 175, cold: 200 } }
-        ]
-      },
-      {
-        name: "Juices & Fruit Teas",
-        items: [
-          { name: "Green Apple Fruit Tea", price: 150 },
-          { name: "Melon Fruit Tea", price: 150 },
-          { name: "Hibiscus Lemonade", price: 150 },
-          { name: "Green Apple Yakult", price: 190 },
-          { name: "Melon Yakult", price: 190 }
-        ]
-      },
-      {
-        name: "Coffee Roasters",
-        items: [
-          { name: "Filtered Coffee", price: 100 },
-          { name: "Espresso / Black", price: 100 },
-          { name: "White", price: 100 },
-          { name: "White Brew", price: 120 },
-          { name: "Cold Brew", price: 120 }
-        ]
-      },
-      {
-        name: "Smoothies & Frappes",
-        items: [
-          { name: "Blueberry Smoothie", price: 160 },
-          { name: "Strawberry Smoothie", price: 160 },
-          { name: "Java Chip Frappe", price: 200 }
-        ]
-      },
-      {
-        name: "Non-Espresso",
-        items: [
-          { name: "Matcha Latte", price: 180 },
-          { name: "Ube Latte", price: 180 },
-          { name: "Strawberry Matcha Latte", price: 200 },
-          { name: "Ube Matcha Latte", price: 200 }
-        ]
-      },
-      {
-        name: "Soda Pop",
-        items: [
-          { name: "Strawberry Soda", price: 160 },
-          { name: "Blueberry Soda", price: 160 },
-          { name: "Butterfly Pea Peach Soda", price: 200 }
-        ]
-      },
-      {
-        name: "Hot Tea",
-        items: [
-          { name: "Pure Chamomile", price: 120 },
-          { name: "English Breakfast", price: 120 },
-          { name: "Green Tea", price: 120 }
-        ]
-      },
-      {
-        name: "Comfort Food",
-        items: [
-          { name: "Siomai Rice Bowl", price: 149 },
-          { name: "Longganisa with Egg", price: 179 },
-          { name: "Bistek Tagalog", price: 199 },
-          { name: "Burger Steak", price: 249 },
-          { name: "Chicken Torikatsu", price: 249 },
-          { name: "Spam with Egg", price: 249 }
-        ]
-      },
-      {
-        name: "Quick Bites",
-        items: [
-          { name: "Siopao", price: 59 },
-          { name: "Fries (BBQ / Sour Cream)", price: 159 },
-          { name: "Chicken Nuggets", price: 179 },
-          { name: "Korean Ramen with Egg", price: 199 },
-          { name: "Mama's Lasagna with Bread", price: 199 }
-        ]
-      },
-      {
-        name: "Sweet Treats",
-        items: [
-          { name: "Chocolate Chip Cookie", price: 90 },
-          { name: "Red Velvet Cookie", price: 90 },
-          { name: "Biscoff Cookie", price: 90 },
-          { name: "Mango Graham", price: 170 },
-          { name: "Tiramisu", price: 190 },
-          { name: "Basque Burnt Cheesecake", price: 190 }
-        ]
-      }
-    ];
-
-    const insertCat = db.prepare("INSERT INTO categories (name) VALUES (?)");
-    const insertItem = db.prepare(`
-      INSERT INTO items (category_id, name, price_hot, price_cold, price_fixed, description)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
-
-    db.transaction(() => {
-      for (const cat of initialData) {
-        const catId = insertCat.run(cat.name).lastInsertRowid;
-        for (const item of cat.items) {
-          const hot = typeof item.price === 'object' ? item.price.hot : null;
-          const cold = typeof item.price === 'object' ? item.price.cold : null;
-          const fixed = typeof item.price === 'number' ? item.price : null;
-          insertItem.run(catId, item.name, hot, cold, fixed, "");
-        }
-      }
-    })();
-  }
+  // Auto-seed if empty - REMOVED redundant block
+  // The seeding is now handled at the top level of the module for consistency.
 
   console.log("Vite middleware and API routes configured. Starting listener...");
   httpServer.listen(PORT, "0.0.0.0", () => {

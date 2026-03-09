@@ -63,9 +63,100 @@ db.exec(`
     quantity INTEGER NOT NULL,
     type TEXT NOT NULL,
     selected_addons TEXT,
-    FOREIGN KEY (order_id) REFERENCES orders(id)
+  FOREIGN KEY (order_id) REFERENCES orders(id)
   );
 `);
+
+// Default Menu Data for Seeding
+const defaultMenuData = [
+  {
+    name: "Specialty Espresso",
+    items: [
+      { name: "Brewed Coffee", price_hot: 100, price_cold: 120, description: "Classic brewed coffee" },
+      { name: "White Chocolate Mocha", price_cold: 180, description: "Sweet and creamy mocha" },
+      { name: "Caramel Macchiato", price_cold: 180, description: "Layers of espresso and caramel" },
+      { name: "Classic Spanish Latte", price_hot: 175, price_cold: 200, description: "Sweetened with condensed milk" },
+      { name: "Seasalt Caramel Latte", price_hot: 175, price_cold: 200, description: "Perfect balance of sweet and salty" },
+      { name: "Hazelnut Latte", price_hot: 175, price_cold: 200, description: "Nutty and aromatic" }
+    ]
+  },
+  {
+    name: "Juices & Fruit Teas",
+    items: [
+      { name: "Green Apple Fruit Tea", price_fixed: 150 },
+      { name: "Melon Fruit Tea", price_fixed: 150 },
+      { name: "Hibiscus Lemonade", price_fixed: 150 },
+      { name: "Green Apple Yakult", price_fixed: 190 },
+      { name: "Melon Yakult", price_fixed: 190 }
+    ]
+  },
+  {
+    name: "Coffee Roasters",
+    items: [
+      { name: "Filtered Coffee", price_fixed: 100 },
+      { name: "Espresso / Black", price_fixed: 100 },
+      { name: "White", price_fixed: 100 },
+      { name: "White Brew", price_fixed: 120 },
+      { name: "Cold Brew", price_fixed: 120 }
+    ]
+  },
+  {
+    name: "Smoothies & Frappes",
+    items: [
+      { name: "Blueberry Smoothie", price_fixed: 160 },
+      { name: "Strawberry Smoothie", price_fixed: 160 },
+      { name: "Java Chip Frappe", price_fixed: 200 }
+    ]
+  },
+  {
+    name: "Non-Espresso",
+    items: [
+      { name: "Matcha Latte", price_fixed: 180 },
+      { name: "Ube Latte", price_fixed: 180 },
+      { name: "Strawberry Matcha Latte", price_fixed: 200 },
+      { name: "Ube Matcha Latte", price_fixed: 200 }
+    ]
+  },
+  {
+    name: "Comfort Food",
+    items: [
+      { name: "Siomai Rice Bowl", price_fixed: 149 },
+      { name: "Longganisa with Egg", price_fixed: 179 },
+      { name: "Bistek Tagalog", price_fixed: 199 },
+      { name: "Burger Steak", price_fixed: 249 },
+      { name: "Chicken Torikatsu", price_fixed: 249 },
+      { name: "Spam with Egg", price_fixed: 249 }
+    ]
+  }
+];
+
+// Auto-seed if empty
+const catCount = db.prepare("SELECT COUNT(*) as count FROM categories").get() as any;
+if (catCount.count === 0) {
+  console.log("[API SERVER] Database is empty, seeding default data...");
+  const insertCat = db.prepare("INSERT INTO categories (name) VALUES (?)");
+  const insertItem = db.prepare(`
+    INSERT INTO items (category_id, name, price_hot, price_cold, price_fixed, description)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+
+  const transaction = db.transaction((data) => {
+    for (const cat of data) {
+      const catId = insertCat.run(cat.name).lastInsertRowid;
+      for (const item of cat.items) {
+        insertItem.run(
+          catId, 
+          item.name, 
+          item.price_hot || null, 
+          item.price_cold || null, 
+          item.price_fixed || null, 
+          item.description || ""
+        );
+      }
+    }
+  });
+  transaction(defaultMenuData);
+}
 
 // Migrations
 try { db.exec("ALTER TABLE items ADD COLUMN image TEXT"); } catch (e) {}

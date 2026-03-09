@@ -331,19 +331,32 @@ export default function AdminDashboard() {
                               {item.price_cold !== null && item.price_cold !== undefined && <span className="text-gray-400 text-xs font-bold uppercase">Cold: <span className="text-black">₱{item.price_cold}</span></span>}
                             </div>
                             {item.description && <p className="text-[10px] text-gray-400 font-bold uppercase mt-2 tracking-widest line-clamp-1">{item.description}</p>}
-                            {item.addons && JSON.parse(item.addons).length > 0 && (
+                            {item.addons && (() => {
+                              try {
+                                const addons = JSON.parse(item.addons);
+                                return Array.isArray(addons) && addons.length > 0;
+                              } catch (e) {
+                                return false;
+                              }
+                            })() && (
                               <div className="flex flex-col gap-2 mt-3">
                                 <div className="flex flex-wrap gap-2">
-                                  {JSON.parse(item.addons).map((addon: any, idx: number) => (
+                                  {(() => {
+                                    try {
+                                      return JSON.parse(item.addons);
+                                    } catch (e) {
+                                      return [];
+                                    }
+                                  })().map((addon: any, idx: number) => (
                                     <span 
                                       key={idx} 
-                                      className={`text-[7px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full ${
+                                      className={`text-[7px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border ${
                                         addon.available !== false 
-                                          ? 'text-orange-500 bg-orange-500/5' 
-                                          : 'text-gray-400 bg-gray-100 line-through'
+                                          ? 'text-orange-500 bg-orange-500/5 border-orange-500/20' 
+                                          : 'text-gray-400 bg-gray-100 border-gray-200 line-through'
                                       }`}
                                     >
-                                      +{addon.name}
+                                      +{addon.name} (₱{addon.price})
                                     </span>
                                   ))}
                                 </div>
@@ -353,14 +366,28 @@ export default function AdminDashboard() {
                                     setManagingAddonsItem(item);
                                   }}
                                   className={`self-start text-[8px] font-black px-2 py-1 rounded-full uppercase tracking-widest flex items-center gap-1 transition-all active:scale-95 border-2 ${
-                                    JSON.parse(item.addons).some((a: any) => a.available !== false) 
+                                    (() => {
+                                      try {
+                                        const addons = JSON.parse(item.addons);
+                                        return addons.some((a: any) => a.available !== false);
+                                      } catch (e) {
+                                        return false;
+                                      }
+                                    })() 
                                       ? 'bg-orange-500 text-white border-orange-500' 
                                       : 'bg-gray-100 text-gray-400 border-gray-200'
                                   }`}
                                   title="Manage add-ons availability"
                                 >
                                   <Plus size={8} strokeWidth={4} />
-                                  {JSON.parse(item.addons).some((a: any) => a.available !== false) ? 'Add-ons' : 'Add-ons Unavailable'}
+                                  {(() => {
+                                    try {
+                                      const addons = JSON.parse(item.addons);
+                                      return addons.some((a: any) => a.available !== false);
+                                    } catch (e) {
+                                      return false;
+                                    }
+                                  })() ? 'Add-ons' : 'Add-ons Unavailable'}
                                 </button>
                               </div>
                             )}
@@ -442,7 +469,14 @@ export default function AdminDashboard() {
                               </div>
                                 <div>
                                   <h3 className="text-2xl font-black uppercase tracking-tighter">Order #{order.id}</h3>
-                                  <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Customer ID: {order.user_email}</p>
+                                  <div className="flex items-center gap-2 mt-1">
+                                    <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Customer ID: {order.user_email}</p>
+                                    {order.payment_method && (
+                                      <span className="bg-black text-white text-[8px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest border border-white/20">
+                                        {order.payment_method}
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
                             </div>
 
@@ -457,7 +491,7 @@ export default function AdminDashboard() {
                                         <div className="flex flex-wrap gap-1 mt-1">
                                           {item.selected_addons.map((addon, aIdx) => (
                                             <span key={aIdx} className="text-[8px] font-black uppercase tracking-tighter bg-black/5 px-2 py-0.5 rounded-full">
-                                              +{addon.name}
+                                              +{addon.name} (₱{addon.price})
                                             </span>
                                           ))}
                                         </div>
@@ -542,54 +576,107 @@ export default function AdminDashboard() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 gap-6">
-                  {orders.filter(o => o.is_paid && o.status === 'completed').length === 0 ? (
+                <div className="space-y-12">
+                  {Object.entries(
+                    orders
+                      .filter(o => o.is_paid && o.status === 'completed')
+                      .reduce((groups, order) => {
+                        const date = new Date(order.created_at).toLocaleDateString(undefined, { 
+                          weekday: 'long', 
+                          year: 'numeric', 
+                          month: 'long', 
+                          day: 'numeric' 
+                        });
+                        if (!groups[date]) groups[date] = { orders: [], total: 0 };
+                        groups[date].orders.push(order);
+                        groups[date].total += order.total;
+                        return groups;
+                      }, {} as Record<string, { orders: Order[], total: number }>)
+                  ).length === 0 ? (
                     <div className="text-center py-12 bg-gray-50 rounded-[2rem] border-2 border-dashed border-gray-200">
                       <p className="text-gray-400 font-black uppercase tracking-widest text-[10px]">No history found</p>
                     </div>
                   ) : (
-                    orders.filter(o => o.is_paid && o.status === 'completed').map(order => (
-                      <div key={order.id} className="bg-gray-50 border-2 border-black/10 rounded-[2.5rem] p-8 opacity-80 hover:opacity-100 transition-all">
-                        <div className="flex flex-col lg:flex-row justify-between gap-8">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-4 mb-6">
-                              <div className="w-10 h-10 rounded-full flex items-center justify-center bg-emerald-100 text-emerald-600">
-                                <CheckCircle size={20} />
-                              </div>
-                              <div>
-                                <h3 className="text-xl font-black uppercase tracking-tighter">Order #{order.id}</h3>
-                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">ID: {order.user_email} • {new Date(order.created_at).toLocaleString()}</p>
-                              </div>
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                              {order.items.map((item, idx) => (
-                                <div key={idx} className="flex flex-col gap-1">
-                                  <span className="bg-white px-3 py-1 rounded-full border border-black/5 text-[10px] font-bold uppercase">
-                                    {item.quantity}x {item.name}
-                                  </span>
-                                  {item.selected_addons && item.selected_addons.length > 0 && (
-                                    <div className="flex flex-wrap gap-1 pl-2">
-                                      {item.selected_addons.map((addon, aIdx) => (
-                                        <span key={aIdx} className="text-[7px] font-black uppercase tracking-tighter text-gray-400">
-                                          +{addon.name}
-                                        </span>
-                                      ))}
+                    Object.entries(
+                      orders
+                        .filter(o => o.is_paid && o.status === 'completed')
+                        .reduce((groups, order) => {
+                          const date = new Date(order.created_at).toLocaleDateString(undefined, { 
+                            weekday: 'long', 
+                            year: 'numeric', 
+                            month: 'long', 
+                            day: 'numeric' 
+                          });
+                          if (!groups[date]) groups[date] = { orders: [], total: 0 };
+                          groups[date].orders.push(order);
+                          groups[date].total += order.total;
+                          return groups;
+                        }, {} as Record<string, { orders: Order[], total: number }>)
+                    ).map(([date, group]) => (
+                      <div key={date} className="space-y-6">
+                        <div className="flex items-center justify-between px-4">
+                          <div className="flex items-center gap-4 flex-1">
+                            <span className="text-xs font-black uppercase tracking-widest text-black">{date}</span>
+                            <div className="h-px flex-1 bg-black/10" />
+                          </div>
+                          <div className="ml-6 flex flex-col items-end">
+                            <span className="text-[8px] font-black uppercase tracking-widest text-gray-400">Daily Sales</span>
+                            <span className="text-lg font-black text-orange-500">₱{group.total}</span>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-1 gap-6">
+                          {group.orders.map(order => (
+                            <div key={order.id} className="bg-gray-50 border-2 border-black/10 rounded-[2.5rem] p-8 opacity-80 hover:opacity-100 transition-all">
+                              <div className="flex flex-col lg:flex-row justify-between gap-8">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-4 mb-6">
+                                    <div className="w-10 h-10 rounded-full flex items-center justify-center bg-emerald-100 text-emerald-600">
+                                      <CheckCircle size={20} />
                                     </div>
-                                  )}
+                                    <div>
+                                      <h3 className="text-xl font-black uppercase tracking-tighter">Order #{order.id}</h3>
+                                      <div className="flex items-center gap-2 mt-1">
+                                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">ID: {order.user_email} • {new Date(order.created_at).toLocaleTimeString()}</p>
+                                        {order.payment_method && (
+                                          <span className="bg-gray-200 text-black text-[7px] font-black px-1.5 py-0.5 rounded-full uppercase tracking-widest border border-black/5">
+                                            {order.payment_method}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="flex flex-wrap gap-2">
+                                    {order.items.map((item, idx) => (
+                                      <div key={idx} className="flex flex-col gap-1">
+                                        <span className="bg-white px-3 py-1 rounded-full border border-black/5 text-[10px] font-bold uppercase">
+                                          {item.quantity}x {item.name}
+                                        </span>
+                                        {item.selected_addons && item.selected_addons.length > 0 && (
+                                          <div className="flex flex-wrap gap-1 pl-2">
+                                            {item.selected_addons.map((addon, aIdx) => (
+                                              <span key={aIdx} className="text-[7px] font-black uppercase tracking-tighter text-gray-400">
+                                                +{addon.name} (₱{addon.price})
+                                              </span>
+                                            ))}
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
                                 </div>
-                              ))}
+                                <div className="flex flex-col items-end justify-center">
+                                  <span className="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-1">Total Paid</span>
+                                  <span className="text-2xl font-black">₱{order.total}</span>
+                                  <button 
+                                    onClick={() => updateOrderStatus(order.id, order.status, 0)}
+                                    className="mt-4 text-[9px] font-black uppercase tracking-widest text-red-500 hover:underline"
+                                  >
+                                    Mark as Unpaid
+                                  </button>
+                                </div>
+                              </div>
                             </div>
-                          </div>
-                          <div className="flex flex-col items-end justify-center">
-                            <span className="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-1">Total Paid</span>
-                            <span className="text-2xl font-black">₱{order.total}</span>
-                            <button 
-                              onClick={() => updateOrderStatus(order.id, order.status, 0)}
-                              className="mt-4 text-[9px] font-black uppercase tracking-widest text-red-500 hover:underline"
-                            >
-                              Mark as Unpaid
-                            </button>
-                          </div>
+                          ))}
                         </div>
                       </div>
                     ))
@@ -659,34 +746,89 @@ export default function AdminDashboard() {
                 </button>
               </div>
 
-              <div className="space-y-3 mb-8">
-                {JSON.parse(managingAddonsItem.addons || '[]').map((addon: any, idx: number) => (
-                  <button
-                    key={idx}
-                    onClick={() => {
-                      const addons = JSON.parse(managingAddonsItem.addons || '[]');
-                      addons[idx].available = addons[idx].available === false ? true : false;
-                      const updatedItem = { ...managingAddonsItem, addons: JSON.stringify(addons) };
-                      setManagingAddonsItem(updatedItem);
-                      updateItemAvailability(updatedItem.id, updatedItem.available, updatedItem.addons);
-                    }}
-                    className={`w-full flex justify-between items-center p-4 rounded-2xl border-2 transition-all active:scale-[0.98] ${
-                      addon.available !== false 
-                        ? 'border-orange-500 bg-orange-500/5 text-black' 
-                        : 'border-gray-100 bg-gray-50 text-gray-400'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className={`w-6 h-6 rounded-full flex items-center justify-center border-2 ${
+              <div className="space-y-4 mb-8 max-h-[50vh] overflow-y-auto pr-2 no-scrollbar">
+                {(() => {
+                  try {
+                    const addons = JSON.parse(managingAddonsItem.addons || '[]');
+                    return Array.isArray(addons) ? addons : [];
+                  } catch (e) {
+                    return [];
+                  }
+                })().map((addon: any, idx: number) => (
+                  <div key={idx} className="flex gap-2 items-center bg-gray-50 p-3 rounded-2xl border-2 border-black/5">
+                    <button
+                      onClick={() => {
+                        const addons = JSON.parse(managingAddonsItem.addons || '[]');
+                        addons[idx].available = addons[idx].available === false ? true : false;
+                        const updatedItem = { ...managingAddonsItem, addons: JSON.stringify(addons) };
+                        setManagingAddonsItem(updatedItem);
+                        updateItemAvailability(updatedItem.id, updatedItem.available, updatedItem.addons);
+                      }}
+                      className={`w-10 h-10 rounded-xl flex items-center justify-center border-2 transition-all ${
                         addon.available !== false ? 'border-orange-500 bg-orange-500 text-white' : 'border-gray-300 bg-white text-gray-300'
-                      }`}>
-                        {addon.available !== false ? <Check size={12} strokeWidth={4} /> : <X size={12} strokeWidth={4} />}
+                      }`}
+                    >
+                      {addon.available !== false ? <Check size={16} strokeWidth={4} /> : <X size={16} strokeWidth={4} />}
+                    </button>
+                    <div className="flex-1 flex flex-col">
+                      <input 
+                        type="text"
+                        value={addon.name}
+                        onChange={(e) => {
+                          const addons = JSON.parse(managingAddonsItem.addons || '[]');
+                          addons[idx].name = e.target.value;
+                          const updatedItem = { ...managingAddonsItem, addons: JSON.stringify(addons) };
+                          setManagingAddonsItem(updatedItem);
+                          updateItemAvailability(updatedItem.id, updatedItem.available, updatedItem.addons);
+                        }}
+                        className="bg-transparent font-black uppercase text-xs tracking-tight outline-none focus:text-orange-500 transition-colors"
+                        placeholder="Add-on Name"
+                      />
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] font-bold text-gray-400">₱</span>
+                        <input 
+                          type="number"
+                          value={addon.price}
+                          onChange={(e) => {
+                            const addons = JSON.parse(managingAddonsItem.addons || '[]');
+                            addons[idx].price = Number(e.target.value);
+                            const updatedItem = { ...managingAddonsItem, addons: JSON.stringify(addons) };
+                            setManagingAddonsItem(updatedItem);
+                            updateItemAvailability(updatedItem.id, updatedItem.available, updatedItem.addons);
+                          }}
+                          className="bg-transparent font-bold text-[10px] outline-none focus:text-orange-500 transition-colors w-16"
+                          placeholder="0"
+                        />
                       </div>
-                      <span className="text-xs font-black uppercase tracking-tight">{addon.name}</span>
                     </div>
-                    <span className="text-[10px] font-bold">₱{addon.price}</span>
-                  </button>
+                    <button 
+                      onClick={() => {
+                        const addons = JSON.parse(managingAddonsItem.addons || '[]');
+                        const newAddons = addons.filter((_: any, i: number) => i !== idx);
+                        const updatedItem = { ...managingAddonsItem, addons: JSON.stringify(newAddons) };
+                        setManagingAddonsItem(updatedItem);
+                        updateItemAvailability(updatedItem.id, updatedItem.available, updatedItem.addons);
+                      }}
+                      className="p-2 text-red-500 hover:bg-red-50 rounded-xl transition-all"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
                 ))}
+
+                <button
+                  onClick={() => {
+                    const addons = JSON.parse(managingAddonsItem.addons || '[]');
+                    addons.push({ name: 'New Add-on', price: 0, available: true });
+                    const updatedItem = { ...managingAddonsItem, addons: JSON.stringify(addons) };
+                    setManagingAddonsItem(updatedItem);
+                    updateItemAvailability(updatedItem.id, updatedItem.available, updatedItem.addons);
+                  }}
+                  className="w-full py-3 rounded-2xl border-2 border-dashed border-black font-black uppercase tracking-widest text-[10px] hover:bg-black/5 transition-all flex items-center justify-center gap-2"
+                >
+                  <Plus size={14} strokeWidth={3} />
+                  Add New Add-on
+                </button>
               </div>
 
               <button
@@ -823,14 +965,23 @@ export default function AdminDashboard() {
                   <div className="space-y-4">
                     <label className="block text-[10px] font-black uppercase tracking-widest">Add-ons</label>
                     <div className="space-y-2">
-                      {(editingItem.addons ? JSON.parse(editingItem.addons) : []).map((addon: { name: string, price: number, available?: boolean }, idx: number) => (
+                      {(() => {
+                        try {
+                          const addons = JSON.parse(editingItem.addons || '[]');
+                          return Array.isArray(addons) ? addons : [];
+                        } catch (e) {
+                          return [];
+                        }
+                      })().map((addon: { name: string, price: number, available?: boolean }, idx: number) => (
                         <div key={idx} className="flex gap-2 items-center">
                           <button
                             type="button"
                             onClick={() => {
-                              const addons = JSON.parse(editingItem.addons || '[]');
-                              addons[idx].available = addons[idx].available === false ? true : false;
-                              setEditingItem({...editingItem, addons: JSON.stringify(addons)});
+                              try {
+                                const addons = JSON.parse(editingItem.addons || '[]');
+                                addons[idx].available = addons[idx].available === false ? true : false;
+                                setEditingItem({...editingItem, addons: JSON.stringify(addons)});
+                              } catch (e) {}
                             }}
                             className={`p-2 rounded-xl border-2 transition-all ${
                               addon.available !== false 
@@ -845,9 +996,11 @@ export default function AdminDashboard() {
                             type="text"
                             value={addon.name}
                             onChange={(e) => {
-                              const addons = JSON.parse(editingItem.addons || '[]');
-                              addons[idx].name = e.target.value;
-                              setEditingItem({...editingItem, addons: JSON.stringify(addons)});
+                              try {
+                                const addons = JSON.parse(editingItem.addons || '[]');
+                                addons[idx].name = e.target.value;
+                                setEditingItem({...editingItem, addons: JSON.stringify(addons)});
+                              } catch (e) {}
                             }}
                             className={`flex-1 px-4 py-2 rounded-xl border-2 border-black font-bold text-xs ${addon.available === false ? 'opacity-50' : ''}`}
                             placeholder="Addon Name"
@@ -856,9 +1009,11 @@ export default function AdminDashboard() {
                             type="number"
                             value={addon.price}
                             onChange={(e) => {
-                              const addons = JSON.parse(editingItem.addons || '[]');
-                              addons[idx].price = Number(e.target.value);
-                              setEditingItem({...editingItem, addons: JSON.stringify(addons)});
+                              try {
+                                const addons = JSON.parse(editingItem.addons || '[]');
+                                addons[idx].price = Number(e.target.value);
+                                setEditingItem({...editingItem, addons: JSON.stringify(addons)});
+                              } catch (e) {}
                             }}
                             className={`w-24 px-4 py-2 rounded-xl border-2 border-black font-bold text-xs ${addon.available === false ? 'opacity-50' : ''}`}
                             placeholder="₱"
@@ -866,9 +1021,11 @@ export default function AdminDashboard() {
                           <button 
                             type="button"
                             onClick={() => {
-                              const addons = JSON.parse(editingItem.addons || '[]');
-                              const newAddons = addons.filter((_: any, i: number) => i !== idx);
-                              setEditingItem({...editingItem, addons: JSON.stringify(newAddons)});
+                              try {
+                                const addons = JSON.parse(editingItem.addons || '[]');
+                                const newAddons = addons.filter((_: any, i: number) => i !== idx);
+                                setEditingItem({...editingItem, addons: JSON.stringify(newAddons)});
+                              } catch (e) {}
                             }}
                             className="p-2 text-red-500 hover:bg-red-50 rounded-xl transition-all"
                           >
@@ -879,9 +1036,13 @@ export default function AdminDashboard() {
                       <button 
                         type="button"
                         onClick={() => {
-                          const addons = JSON.parse(editingItem.addons || '[]');
-                          addons.push({ name: '', price: 0, available: true });
-                          setEditingItem({...editingItem, addons: JSON.stringify(addons)});
+                          try {
+                            const addons = JSON.parse(editingItem.addons || '[]');
+                            addons.push({ name: '', price: 0, available: true });
+                            setEditingItem({...editingItem, addons: JSON.stringify(addons)});
+                          } catch (e) {
+                            setEditingItem({...editingItem, addons: JSON.stringify([{ name: '', price: 0, available: true }])});
+                          }
                         }}
                         className="w-full py-2 rounded-xl border-2 border-dashed border-black text-[10px] font-black uppercase tracking-widest hover:bg-black/5 transition-all"
                       >

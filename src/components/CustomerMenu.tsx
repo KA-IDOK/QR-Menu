@@ -10,7 +10,7 @@ interface CartItem extends MenuItem {
   quantity: number;
   selectedType: 'hot' | 'cold' | 'fixed';
   selectedPrice: number;
-  selectedAddons: { name: string, price: number }[];
+  selectedAddons: { name: string, price: number, quantity: number }[];
 }
 
 export default function CustomerMenu() {
@@ -28,11 +28,13 @@ export default function CustomerMenu() {
   const [showOrderTracker, setShowOrderTracker] = useState(false);
   const [orders, setOrders] = useState<Order[]>([]);
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState<'GCash' | 'Card' | 'Counter'>('Counter');
   const [pendingItem, setPendingItem] = useState<{ 
     item: MenuItem, 
     type: 'hot' | 'cold' | 'fixed', 
     price: number,
-    selectedAddons: { name: string, price: number }[]
+    selectedAddons: { name: string, price: number, quantity: number }[]
   } | null>(null);
   
   const [customerId] = useState(() => {
@@ -125,31 +127,26 @@ export default function CustomerMenu() {
   }, [customerId]);
 
   const addToCart = (item: MenuItem, type: 'hot' | 'cold' | 'fixed', price: number) => {
-    setPendingItem({ item, type, price, selectedAddons: [] });
-  };
-
-  const confirmAddToCart = () => {
-    if (!pendingItem) return;
-    const { item, type, price, selectedAddons } = pendingItem;
     setCart(prev => {
-      // We check for same item, same type, AND same addons to group them
+      // We check for same item, same type, AND same addons (empty for new items) to group them
       const existing = prev.find(i => 
         i.id === item.id && 
         i.selectedType === type && 
-        JSON.stringify(i.selectedAddons) === JSON.stringify(selectedAddons)
+        i.selectedAddons.length === 0
       );
       if (existing) {
         return prev.map(i => 
           i.id === item.id && 
           i.selectedType === type && 
-          JSON.stringify(i.selectedAddons) === JSON.stringify(selectedAddons)
+          i.selectedAddons.length === 0
             ? { ...i, quantity: i.quantity + 1 } 
             : i
         );
       }
-      return [...prev, { ...item, quantity: 1, selectedType: type, selectedPrice: price, selectedAddons }];
+      return [...prev, { ...item, quantity: 1, selectedType: type, selectedPrice: price, selectedAddons: [] }];
     });
-    setPendingItem(null);
+    // Show cart automatically so they can add add-ons
+    setShowCart(true);
   };
 
   const updateCartQuantity = (id: number, type: string, addons: any[], delta: number) => {
@@ -163,8 +160,8 @@ export default function CustomerMenu() {
   };
 
   const cartTotal = cart.reduce((sum, item) => {
-    const addonsTotal = item.selectedAddons.reduce((s, a) => s + a.price, 0);
-    return sum + ((item.selectedPrice + addonsTotal) * item.quantity);
+    const addonsTotal = item.selectedAddons.reduce((s, a) => s + (a.price * a.quantity), 0);
+    return sum + (item.selectedPrice * item.quantity) + addonsTotal;
   }, 0);
 
   const finalizeOrder = async () => {
@@ -177,6 +174,7 @@ export default function CustomerMenu() {
         body: JSON.stringify({
           user_email: customerId,
           total: cartTotal,
+          payment_method: paymentMethod,
           items: cart.map(i => ({
             id: i.id,
             name: i.name,
@@ -190,6 +188,7 @@ export default function CustomerMenu() {
       if (res.ok) {
         setCart([]);
         setShowCart(false);
+        setShowPaymentModal(false);
         fetchOrders();
       }
     } catch (err) {
@@ -351,16 +350,37 @@ export default function CustomerMenu() {
                               ) : (
                                 <span className="bg-red-500 text-white text-[8px] font-black px-2 py-1 rounded-full uppercase tracking-widest">Sold Out</span>
                               )}
-                              {item.addons && JSON.parse(item.addons).length > 0 && (
-                                <span className={`text-white text-[8px] font-black px-2 py-1 rounded-full uppercase tracking-widest flex items-center gap-1 shadow-sm ${
-                                  JSON.parse(item.addons).some((a: any) => a.available !== false) 
-                                    ? 'bg-orange-500' 
-                                    : 'bg-gray-400'
-                                }`}>
-                                  <Plus size={8} strokeWidth={4} />
-                                  {JSON.parse(item.addons).some((a: any) => a.available !== false) ? 'Add-ons' : 'Add-ons Unavailable'}
-                                </span>
-                              )}
+                                {item.addons && (() => {
+                                  try {
+                                    const addons = JSON.parse(item.addons);
+                                    return Array.isArray(addons) && addons.length > 0;
+                                  } catch (e) {
+                                    return false;
+                                  }
+                                })() && (
+                                  <span className={`text-white text-[8px] font-black px-2 py-1 rounded-full uppercase tracking-widest flex items-center gap-1 shadow-sm ${
+                                    (() => {
+                                      try {
+                                        const addons = JSON.parse(item.addons);
+                                        return addons.some((a: any) => a.available !== false);
+                                      } catch (e) {
+                                        return false;
+                                      }
+                                    })() 
+                                      ? 'bg-orange-500' 
+                                      : 'bg-gray-400'
+                                  }`}>
+                                    <Plus size={8} strokeWidth={4} />
+                                    {(() => {
+                                      try {
+                                        const addons = JSON.parse(item.addons);
+                                        return addons.some((a: any) => a.available !== false);
+                                      } catch (e) {
+                                        return false;
+                                      }
+                                    })() ? 'Add-ons' : 'Add-ons Unavailable'}
+                                  </span>
+                                )}
                             </div>
                           </div>
                           
@@ -370,13 +390,36 @@ export default function CustomerMenu() {
                             </p>
                           )}
 
-                          {item.addons && JSON.parse(item.addons).length > 0 && (
-                            <div className="flex flex-wrap gap-x-3 gap-y-1 mb-6">
-                              {JSON.parse(item.addons).map((addon: any, idx: number) => (
-                                <span key={idx} className="text-[8px] font-black text-orange-500 uppercase tracking-widest">
-                                  +{addon.name}
-                                </span>
-                              ))}
+                          {item.addons && (() => {
+                            try {
+                              const addons = JSON.parse(item.addons);
+                              return Array.isArray(addons) && addons.length > 0;
+                            } catch (e) {
+                              return false;
+                            }
+                          })() && (
+                            <div className="mb-6">
+                              <p className="text-[8px] font-black uppercase tracking-widest text-orange-500 mb-2">Available Add-ons</p>
+                              <div className="flex flex-wrap gap-2">
+                                {(() => {
+                                  try {
+                                    return JSON.parse(item.addons);
+                                  } catch (e) {
+                                    return [];
+                                  }
+                                })().map((addon: any, idx: number) => (
+                                  <span 
+                                    key={idx} 
+                                    className={`text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-md border ${
+                                      addon.available !== false 
+                                        ? 'text-orange-500 bg-orange-500/5 border-orange-500/20' 
+                                        : 'text-gray-300 bg-gray-50 border-gray-100 line-through'
+                                    }`}
+                                  >
+                                    +{addon.name} (₱{addon.price})
+                                  </span>
+                                ))}
+                              </div>
                             </div>
                           )}
                         </div>
@@ -468,7 +511,7 @@ export default function CustomerMenu() {
               initial={{ y: "100%" }}
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
-              className="bg-white w-full max-w-lg rounded-t-[3rem] sm:rounded-[3rem] p-8 sm:p-10 border-t-4 sm:border-4 border-black shadow-2xl flex flex-col max-h-[90vh]"
+              className="bg-white w-full max-w-lg rounded-t-[3rem] sm:rounded-[3rem] p-8 sm:p-10 border-t-4 sm:border-4 border-black shadow-2xl flex flex-col max-h-[95vh] h-[90vh]"
             >
               <div className="flex justify-between items-center mb-8">
                 <div>
@@ -501,6 +544,11 @@ export default function CustomerMenu() {
                               <p className="text-[9px] font-black uppercase tracking-widest text-gray-400">Order #{order.id}</p>
                               <div className="flex items-center gap-2 mt-1">
                                 <p className="text-[10px] font-bold text-gray-500">{new Date(order.created_at).toLocaleTimeString()}</p>
+                                {order.payment_method && (
+                                  <span className="bg-black text-white text-[7px] font-black px-1.5 py-0.5 rounded-full uppercase tracking-widest border border-white/20">
+                                    {order.payment_method}
+                                  </span>
+                                )}
                                 <span className={`text-[8px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest ${
                                   order.status === 'completed' ? 'bg-green-100 text-green-600' : 'bg-orange-100 text-orange-600'
                                 }`}>
@@ -532,7 +580,7 @@ export default function CustomerMenu() {
                                   <div className="flex flex-wrap gap-1 mt-0.5">
                                     {item.selected_addons.map((addon, aIdx) => (
                                       <span key={aIdx} className="text-[7px] font-black uppercase tracking-tighter text-gray-400">
-                                        +{addon.name}
+                                        +{addon.name} (₱{addon.price})
                                       </span>
                                     ))}
                                   </div>
@@ -555,38 +603,69 @@ export default function CustomerMenu() {
                   {orders.filter(o => o.is_paid && o.status === 'completed').length === 0 ? (
                     <p className="text-center py-6 text-[10px] font-bold text-gray-400 uppercase tracking-widest bg-gray-50 rounded-2xl border-2 border-dashed border-gray-200">No past orders</p>
                   ) : (
-                    <div className="space-y-4">
-                      {orders.filter(o => o.is_paid && o.status === 'completed').map(order => (
-                        <div key={order.id} className="bg-gray-50 border border-black/5 p-5 rounded-2xl opacity-80">
-                          <div className="flex justify-between items-start mb-3">
-                            <div>
-                              <p className="text-[9px] font-black uppercase tracking-widest text-gray-400">Order #{order.id}</p>
-                              <p className="text-[10px] font-bold text-gray-500">{new Date(order.created_at).toLocaleDateString()}</p>
-                            </div>
-                            <span className="text-emerald-600 text-[8px] font-black uppercase tracking-widest">Completed</span>
+                    <div className="space-y-8">
+                      {Object.entries(
+                        orders
+                          .filter(o => o.is_paid && o.status === 'completed')
+                          .reduce((groups, order) => {
+                            const date = new Date(order.created_at).toLocaleDateString(undefined, { 
+                              weekday: 'long', 
+                              year: 'numeric', 
+                              month: 'long', 
+                              day: 'numeric' 
+                            });
+                            if (!groups[date]) groups[date] = [];
+                            groups[date].push(order);
+                            return groups;
+                          }, {} as Record<string, Order[]>)
+                      ).map(([date, dateOrders]) => (
+                        <div key={date} className="space-y-4">
+                          <div className="flex items-center gap-4">
+                            <span className="text-[10px] font-black uppercase tracking-widest text-black/40">{date}</span>
+                            <div className="h-px flex-1 bg-black/5" />
                           </div>
-                          <div className="space-y-2 mb-3">
-                            {order.items.map((item, idx) => (
-                              <div key={idx} className="flex flex-col">
-                                <div className="flex justify-between text-[10px]">
-                                  <span className="font-bold">{item.quantity}x {item.name}</span>
-                                  <span className="font-black">₱{item.price * item.quantity}</span>
-                                </div>
-                                {item.selected_addons && item.selected_addons.length > 0 && (
-                                  <div className="flex flex-wrap gap-1 mt-0.5">
-                                    {item.selected_addons.map((addon, aIdx) => (
-                                      <span key={aIdx} className="text-[7px] font-black uppercase tracking-tighter text-gray-400">
-                                        +{addon.name}
-                                      </span>
-                                    ))}
+                          <div className="space-y-4">
+                            {dateOrders.map(order => (
+                              <div key={order.id} className="bg-gray-50 border border-black/5 p-5 rounded-2xl opacity-80">
+                                <div className="flex justify-between items-start mb-3">
+                                  <div>
+                                    <p className="text-[9px] font-black uppercase tracking-widest text-gray-400">Order #{order.id}</p>
+                                    <div className="flex items-center gap-2">
+                                      <p className="text-[10px] font-bold text-gray-500">{new Date(order.created_at).toLocaleTimeString()}</p>
+                                      {order.payment_method && (
+                                        <span className="bg-gray-200 text-black text-[7px] font-black px-1.5 py-0.5 rounded-full uppercase tracking-widest border border-black/5">
+                                          {order.payment_method}
+                                        </span>
+                                      )}
+                                    </div>
                                   </div>
-                                )}
+                                  <span className="text-emerald-600 text-[8px] font-black uppercase tracking-widest">Completed</span>
+                                </div>
+                                <div className="space-y-2 mb-3">
+                                  {order.items.map((item, idx) => (
+                                    <div key={idx} className="flex flex-col">
+                                      <div className="flex justify-between text-[10px]">
+                                        <span className="font-bold">{item.quantity}x {item.name}</span>
+                                        <span className="font-black">₱{item.price * item.quantity}</span>
+                                      </div>
+                                      {item.selected_addons && item.selected_addons.length > 0 && (
+                                        <div className="flex flex-wrap gap-1 mt-0.5">
+                                          {item.selected_addons.map((addon, aIdx) => (
+                                            <span key={aIdx} className="text-[7px] font-black uppercase tracking-tighter text-gray-400">
+                                              +{addon.name} (₱{addon.price})
+                                            </span>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                                <div className="flex justify-between items-center pt-3 border-t border-black/5">
+                                  <span className="text-[10px] font-bold text-gray-400 uppercase">Total Amount</span>
+                                  <span className="font-black text-sm">₱{order.total}</span>
+                                </div>
                               </div>
                             ))}
-                          </div>
-                          <div className="flex justify-between items-center pt-3 border-t border-black/5">
-                            <span className="text-[10px] font-bold text-gray-400 uppercase">Total Amount</span>
-                            <span className="font-black text-sm">₱{order.total}</span>
                           </div>
                         </div>
                       ))}
@@ -612,7 +691,7 @@ export default function CustomerMenu() {
               initial={{ y: "100%" }}
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
-              className="bg-white w-full max-w-lg rounded-t-[3rem] sm:rounded-[3rem] p-8 sm:p-10 border-t-4 sm:border-4 border-black shadow-2xl flex flex-col max-h-[90vh]"
+              className="bg-white w-full max-w-lg rounded-t-[3rem] sm:rounded-[3rem] p-8 sm:p-10 border-t-4 sm:border-4 border-black shadow-2xl flex flex-col max-h-[95vh] h-[90vh]"
             >
               <div className="flex justify-between items-center mb-8">
                 <div>
@@ -659,32 +738,116 @@ export default function CustomerMenu() {
                         </div>
                       )}
                       <div className="flex-1">
-                        <h4 className="font-black uppercase text-sm tracking-tight">{item.name}</h4>
-                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{item.selectedType} • ₱{item.selectedPrice}</p>
-                        {item.selectedAddons.length > 0 && (
-                          <div className="mt-1 flex flex-wrap gap-1">
-                            {item.selectedAddons.map(addon => (
-                              <span key={addon.name} className="text-[8px] font-black uppercase tracking-tighter bg-black/5 px-2 py-0.5 rounded-full">
-                                +{addon.name}
-                              </span>
-                            ))}
+                        <div className="flex justify-between items-center mb-2 pr-2">
+                          <div>
+                            <h4 className="font-black uppercase text-sm tracking-tight">{item.name}</h4>
+                            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{item.selectedType} • ₱{item.selectedPrice}</p>
+                          </div>
+                          
+                          {/* Main Item Quantity Editor moved here */}
+                          <div className="flex items-center gap-3 bg-white border-2 border-black rounded-xl p-1 shrink-0">
+                            <button 
+                              onClick={() => updateCartQuantity(item.id, item.selectedType, item.selectedAddons, -1)}
+                              className="p-1 hover:bg-black hover:text-white rounded-lg transition-all"
+                            >
+                              <Minus size={14} />
+                            </button>
+                            <span className="font-black text-sm w-4 text-center">{item.quantity}</span>
+                            <button 
+                              onClick={() => updateCartQuantity(item.id, item.selectedType, item.selectedAddons, 1)}
+                              className="p-1 hover:bg-black hover:text-white rounded-lg transition-all"
+                            >
+                              <Plus size={14} />
+                            </button>
+                          </div>
+                        </div>
+                        
+                        {/* Add-ons selection in cart */}
+                        {item.addons && (() => {
+                          try {
+                            const addons = JSON.parse(item.addons);
+                            return Array.isArray(addons) && addons.length > 0;
+                          } catch (e) {
+                            return false;
+                          }
+                        })() && (
+                          <div className="mt-3 space-y-3">
+                            <p className="text-[8px] font-black uppercase tracking-widest text-black/40">Customize Add-ons</p>
+                            <div className="space-y-2">
+                              {(() => {
+                                try {
+                                  return JSON.parse(item.addons);
+                                } catch (e) {
+                                  return [];
+                                }
+                              })().map((addon: { name: string, price: number, available?: boolean }) => {
+                                const selectedAddon = item.selectedAddons.find(a => a.name === addon.name);
+                                const quantity = selectedAddon ? selectedAddon.quantity : 0;
+                                const isAvailable = addon.available !== false;
+                                
+                                if (!isAvailable && quantity === 0) return null;
+
+                                return (
+                                  <div key={addon.name} className="flex items-center justify-between bg-white p-2 rounded-xl border border-black/5">
+                                    <div className="flex flex-col">
+                                      <span className="text-[9px] font-black uppercase tracking-tight">{addon.name}</span>
+                                      <span className="text-[8px] font-bold text-gray-400">₱{addon.price}</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <button 
+                                        disabled={!isAvailable && quantity === 0}
+                                        onClick={() => {
+                                          setCart(prev => prev.map((i, idx2) => {
+                                            if (idx === idx2) {
+                                              const existing = i.selectedAddons.find(a => a.name === addon.name);
+                                              let newAddons;
+                                              if (existing) {
+                                                if (existing.quantity <= 1) {
+                                                  newAddons = i.selectedAddons.filter(a => a.name !== addon.name);
+                                                } else {
+                                                  newAddons = i.selectedAddons.map(a => a.name === addon.name ? { ...a, quantity: a.quantity - 1 } : a);
+                                                }
+                                              } else {
+                                                return i;
+                                              }
+                                              return { ...i, selectedAddons: newAddons };
+                                            }
+                                            return i;
+                                          }));
+                                        }}
+                                        className="w-6 h-6 rounded-lg border border-black/10 flex items-center justify-center hover:bg-black hover:text-white transition-all disabled:opacity-30"
+                                      >
+                                        <Minus size={10} />
+                                      </button>
+                                      <span className="text-[10px] font-black w-4 text-center">{quantity}</span>
+                                      <button 
+                                        disabled={!isAvailable}
+                                        onClick={() => {
+                                          setCart(prev => prev.map((i, idx2) => {
+                                            if (idx === idx2) {
+                                              const existing = i.selectedAddons.find(a => a.name === addon.name);
+                                              let newAddons;
+                                              if (existing) {
+                                                newAddons = i.selectedAddons.map(a => a.name === addon.name ? { ...a, quantity: a.quantity + 1 } : a);
+                                              } else {
+                                                newAddons = [...i.selectedAddons, { name: addon.name, price: addon.price, quantity: 1 }];
+                                              }
+                                              return { ...i, selectedAddons: newAddons };
+                                            }
+                                            return i;
+                                          }));
+                                        }}
+                                        className="w-6 h-6 rounded-lg border border-black/10 flex items-center justify-center hover:bg-black hover:text-white transition-all disabled:opacity-30"
+                                      >
+                                        <Plus size={10} />
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
                           </div>
                         )}
-                      </div>
-                      <div className="flex items-center gap-3 bg-white border-2 border-black rounded-xl p-1">
-                        <button 
-                          onClick={() => updateCartQuantity(item.id, item.selectedType, item.selectedAddons, -1)}
-                          className="p-1 hover:bg-black hover:text-white rounded-lg transition-all"
-                        >
-                          <Minus size={14} />
-                        </button>
-                        <span className="font-black text-sm w-4 text-center">{item.quantity}</span>
-                        <button 
-                          onClick={() => updateCartQuantity(item.id, item.selectedType, item.selectedAddons, 1)}
-                          className="p-1 hover:bg-black hover:text-white rounded-lg transition-all"
-                        >
-                          <Plus size={14} />
-                        </button>
                       </div>
                       <button 
                         onClick={() => setCart(prev => prev.filter(i => 
@@ -707,101 +870,15 @@ export default function CustomerMenu() {
                     <span className="text-4xl font-black tracking-tighter">₱{cartTotal}</span>
                   </div>
                   <button 
-                    onClick={finalizeOrder}
+                    onClick={() => setShowPaymentModal(true)}
                     disabled={isSubmittingOrder}
                     className="w-full bg-black text-white py-5 rounded-2xl font-black uppercase tracking-widest hover:bg-gray-900 active:scale-95 transition-all shadow-xl flex items-center justify-center gap-3 disabled:opacity-50"
                   >
-                    {isSubmittingOrder ? <RefreshCw className="animate-spin" size={20} /> : <ShoppingBag size={20} />}
+                    <ShoppingBag size={20} />
                     Finalize Order
                   </button>
                 </div>
               )}
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Add to Cart Confirmation Modal */}
-      <AnimatePresence>
-        {pendingItem && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-6"
-          >
-            <motion.div 
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 border-4 border-black shadow-2xl text-center"
-            >
-              <div className="w-16 h-16 bg-black rounded-full flex items-center justify-center text-white mx-auto mb-6">
-                <ShoppingBag size={32} />
-              </div>
-              <h3 className="text-2xl font-black uppercase tracking-tighter mb-2">Add to cart?</h3>
-              <p className="text-gray-400 font-bold uppercase tracking-widest text-[10px] mb-6">
-                {pendingItem.item.name} ({pendingItem.type})
-              </p>
-
-              {pendingItem.item.addons && JSON.parse(pendingItem.item.addons).length > 0 && (
-                <div className="text-left mb-8 space-y-3">
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className="w-1 h-4 bg-orange-500 rounded-full" />
-                    <p className="text-[11px] font-black uppercase tracking-widest text-black">Would you like an add-on?</p>
-                  </div>
-                  <div className="max-h-40 overflow-y-auto pr-2 no-scrollbar space-y-2">
-                    {JSON.parse(pendingItem.item.addons).map((addon: { name: string, price: number, available?: boolean }) => {
-                      const isSelected = pendingItem.selectedAddons.some(a => a.name === addon.name);
-                      const isAvailable = addon.available !== false;
-                      return (
-                        <button
-                          key={addon.name}
-                          disabled={!isAvailable}
-                          onClick={() => {
-                            setPendingItem(prev => {
-                              if (!prev) return null;
-                              const alreadySelected = prev.selectedAddons.some(a => a.name === addon.name);
-                              const newAddons = alreadySelected
-                                ? prev.selectedAddons.filter(a => a.name !== addon.name)
-                                : [...prev.selectedAddons, addon];
-                              return { ...prev, selectedAddons: newAddons };
-                            });
-                          }}
-                          className={`w-full flex justify-between items-center p-3 rounded-xl border-2 transition-all ${
-                            !isAvailable 
-                              ? 'border-gray-100 bg-gray-50 text-gray-300 cursor-not-allowed'
-                              : isSelected 
-                                ? 'border-orange-500 bg-orange-500 text-white' 
-                                : 'border-black/5 bg-gray-50 text-black hover:border-black/20'
-                          }`}
-                        >
-                          <div className="flex flex-col items-start">
-                            <span className="text-[10px] font-black uppercase tracking-tight">{addon.name}</span>
-                            {!isAvailable && <span className="text-[7px] font-black uppercase text-red-400">Unavailable</span>}
-                          </div>
-                          <span className="text-[10px] font-bold">+₱{addon.price}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-              
-              <div className="flex gap-4">
-                <button 
-                  onClick={() => setPendingItem(null)}
-                  className="flex-1 py-4 rounded-2xl border-2 border-black font-black uppercase tracking-widest text-xs hover:bg-gray-50 transition-all"
-                >
-                  No
-                </button>
-                <button 
-                  onClick={confirmAddToCart}
-                  className="flex-1 py-4 rounded-2xl bg-black text-white font-black uppercase tracking-widest text-xs hover:bg-gray-900 transition-all shadow-lg"
-                >
-                  Yes
-                </button>
-              </div>
             </motion.div>
           </motion.div>
         )}
@@ -854,6 +931,73 @@ export default function CustomerMenu() {
                   Login
                 </button>
               </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Payment Method Modal */}
+      <AnimatePresence>
+        {showPaymentModal && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] flex items-center justify-center px-6 bg-black/80 backdrop-blur-sm"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              className="bg-white w-full max-w-sm rounded-[3rem] p-8 border-4 border-black shadow-2xl"
+            >
+              <div className="flex justify-between items-center mb-8">
+                <h2 className="text-3xl font-black uppercase tracking-tighter">Payment</h2>
+                <button 
+                  onClick={() => setShowPaymentModal(false)}
+                  className="w-10 h-10 rounded-full border-2 border-black flex items-center justify-center hover:bg-black hover:text-white transition-all"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="space-y-8">
+                <div className="space-y-4">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-gray-400 text-center">Select Payment Method</p>
+                  <div className="grid grid-cols-1 gap-3">
+                    {(['GCash', 'Card', 'Counter'] as const).map(method => (
+                      <button
+                        key={method}
+                        onClick={() => setPaymentMethod(method)}
+                        className={`py-4 rounded-2xl font-black uppercase text-xs tracking-widest border-2 transition-all flex items-center justify-center gap-3 ${
+                          paymentMethod === method 
+                            ? 'bg-black text-white border-black shadow-lg scale-[1.02]' 
+                            : 'bg-white text-gray-400 border-gray-200 hover:border-black hover:text-black'
+                        }`}
+                      >
+                        <CreditCard size={16} />
+                        {method}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="pt-6 border-t-2 border-black/5">
+                  <div className="flex justify-between items-end mb-6">
+                    <span className="text-gray-400 font-black uppercase tracking-widest text-[10px]">Total to Pay</span>
+                    <span className="text-3xl font-black tracking-tighter">₱{cartTotal}</span>
+                  </div>
+                  
+                  <button 
+                    onClick={finalizeOrder}
+                    disabled={isSubmittingOrder}
+                    className="w-full bg-black text-white py-5 rounded-2xl font-black uppercase tracking-widest hover:bg-gray-900 active:scale-95 transition-all shadow-xl flex items-center justify-center gap-3 disabled:opacity-50"
+                  >
+                    {isSubmittingOrder ? <RefreshCw className="animate-spin" size={20} /> : <ShoppingBag size={20} />}
+                    Confirm Order
+                  </button>
+                </div>
+              </div>
             </motion.div>
           </motion.div>
         )}

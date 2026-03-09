@@ -28,6 +28,7 @@ export interface Order {
   total: number;
   status: 'pending' | 'completed';
   is_paid: number;
+  payment_method?: string;
   created_at: string;
   items: OrderItem[];
 }
