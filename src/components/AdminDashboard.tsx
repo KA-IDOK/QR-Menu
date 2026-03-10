@@ -176,8 +176,9 @@ export default function AdminDashboard() {
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onloadend = () => {
-      setEditingItem(prev => prev ? { ...prev, image: reader.result as string } : null);
+    reader.onloadend = async () => {
+      const base64 = reader.result as string;
+      setEditingItem(prev => prev ? { ...prev, image: base64 } : null);
     };
     reader.readAsDataURL(file);
   };
@@ -334,7 +335,8 @@ export default function AdminDashboard() {
                             {item.addons && (() => {
                               try {
                                 const addons = JSON.parse(item.addons);
-                                return Array.isArray(addons) && addons.length > 0;
+                                const category = menu.find(c => c.id === item.category_id);
+                                return Array.isArray(addons) && addons.length > 0 && category?.name !== "SWEET TREATS";
                               } catch (e) {
                                 return false;
                               }
@@ -566,17 +568,17 @@ export default function AdminDashboard() {
                       <History size={24} />
                     </div>
                     <div>
-                      <h3 className="text-3xl font-black uppercase tracking-tighter">Order History</h3>
-                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Completed & paid transactions</p>
+                      <h3 className="text-3xl font-black uppercase tracking-tighter">Sales History</h3>
+                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">All completed transactions grouped by date</p>
                     </div>
                   </div>
                   <div className="bg-black text-white px-8 py-4 rounded-3xl border-4 border-orange-500 shadow-xl">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-orange-500 mb-1">Total Revenue</p>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-orange-500 mb-1">Lifetime Revenue</p>
                     <p className="text-3xl font-black tracking-tighter">₱{orders.filter(o => o.is_paid && o.status === 'completed').reduce((sum, o) => sum + o.total, 0)}</p>
                   </div>
                 </div>
 
-                <div className="space-y-12">
+                <div className="space-y-16">
                   {Object.entries(
                     orders
                       .filter(o => o.is_paid && o.status === 'completed')
@@ -612,64 +614,57 @@ export default function AdminDashboard() {
                           groups[date].total += order.total;
                           return groups;
                         }, {} as Record<string, { orders: Order[], total: number }>)
-                    ).map(([date, group]) => (
-                      <div key={date} className="space-y-6">
-                        <div className="flex items-center justify-between px-4">
-                          <div className="flex items-center gap-4 flex-1">
-                            <span className="text-xs font-black uppercase tracking-widest text-black">{date}</span>
-                            <div className="h-px flex-1 bg-black/10" />
+                    )
+                    .sort((a, b) => new Date(b[1].orders[0].created_at).getTime() - new Date(a[1].orders[0].created_at).getTime())
+                    .map(([date, group]) => (
+                      <div key={date} className="bg-gray-50/50 p-8 rounded-[3rem] border-2 border-black/5">
+                        <div className="flex items-center justify-between mb-8 pb-4 border-b-2 border-black/5">
+                          <div className="flex items-center gap-4">
+                            <div className="w-10 h-10 bg-black text-white rounded-2xl flex items-center justify-center font-black text-xs">
+                              {new Date(group.orders[0].created_at).getDate()}
+                            </div>
+                            <div>
+                              <h4 className="text-xl font-black uppercase tracking-tighter">{date}</h4>
+                              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{group.orders.length} Orders Processed</p>
+                            </div>
                           </div>
-                          <div className="ml-6 flex flex-col items-end">
-                            <span className="text-[8px] font-black uppercase tracking-widest text-gray-400">Daily Sales</span>
-                            <span className="text-lg font-black text-orange-500">₱{group.total}</span>
+                          <div className="text-right">
+                            <p className="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-1">Total Sales</p>
+                            <p className="text-3xl font-black text-orange-500 tracking-tighter">₱{group.total}</p>
                           </div>
                         </div>
-                        <div className="grid grid-cols-1 gap-6">
+                        <div className="grid grid-cols-1 gap-4">
                           {group.orders.map(order => (
-                            <div key={order.id} className="bg-gray-50 border-2 border-black/10 rounded-[2.5rem] p-8 opacity-80 hover:opacity-100 transition-all">
-                              <div className="flex flex-col lg:flex-row justify-between gap-8">
+                            <div key={order.id} className="bg-white border-2 border-black/10 rounded-3xl p-6 hover:border-black transition-all">
+                              <div className="flex flex-col lg:flex-row justify-between gap-6">
                                 <div className="flex-1">
-                                  <div className="flex items-center gap-4 mb-6">
-                                    <div className="w-10 h-10 rounded-full flex items-center justify-center bg-emerald-100 text-emerald-600">
-                                      <CheckCircle size={20} />
+                                  <div className="flex items-center gap-4 mb-4">
+                                    <div className="w-8 h-8 rounded-full flex items-center justify-center bg-emerald-100 text-emerald-600">
+                                      <CheckCircle size={16} />
                                     </div>
                                     <div>
-                                      <h3 className="text-xl font-black uppercase tracking-tighter">Order #{order.id}</h3>
-                                      <div className="flex items-center gap-2 mt-1">
-                                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">ID: {order.user_email} • {new Date(order.created_at).toLocaleTimeString()}</p>
-                                        {order.payment_method && (
-                                          <span className="bg-gray-200 text-black text-[7px] font-black px-1.5 py-0.5 rounded-full uppercase tracking-widest border border-black/5">
-                                            {order.payment_method}
-                                          </span>
-                                        )}
-                                      </div>
+                                      <h3 className="text-lg font-black uppercase tracking-tighter">Order #{order.id}</h3>
+                                      <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">{new Date(order.created_at).toLocaleTimeString()} • {order.user_email}</p>
                                     </div>
+                                    {order.payment_method && (
+                                      <span className="bg-black text-white text-[7px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest">
+                                        {order.payment_method}
+                                      </span>
+                                    )}
                                   </div>
                                   <div className="flex flex-wrap gap-2">
                                     {order.items.map((item, idx) => (
-                                      <div key={idx} className="flex flex-col gap-1">
-                                        <span className="bg-white px-3 py-1 rounded-full border border-black/5 text-[10px] font-bold uppercase">
-                                          {item.quantity}x {item.name}
-                                        </span>
-                                        {item.selected_addons && item.selected_addons.length > 0 && (
-                                          <div className="flex flex-wrap gap-1 pl-2">
-                                            {item.selected_addons.map((addon, aIdx) => (
-                                              <span key={aIdx} className="text-[7px] font-black uppercase tracking-tighter text-gray-400">
-                                                +{addon.name} (₱{addon.price})
-                                              </span>
-                                            ))}
-                                          </div>
-                                        )}
-                                      </div>
+                                      <span key={idx} className="bg-gray-50 px-3 py-1 rounded-full border border-black/5 text-[9px] font-bold uppercase">
+                                        {item.quantity}x {item.name} ({item.type})
+                                      </span>
                                     ))}
                                   </div>
                                 </div>
                                 <div className="flex flex-col items-end justify-center">
-                                  <span className="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-1">Total Paid</span>
-                                  <span className="text-2xl font-black">₱{order.total}</span>
+                                  <span className="text-xl font-black">₱{order.total}</span>
                                   <button 
                                     onClick={() => updateOrderStatus(order.id, order.status, 0)}
-                                    className="mt-4 text-[9px] font-black uppercase tracking-widest text-red-500 hover:underline"
+                                    className="mt-2 text-[8px] font-black uppercase tracking-widest text-red-500 hover:underline"
                                   >
                                     Mark as Unpaid
                                   </button>
@@ -889,20 +884,24 @@ export default function AdminDashboard() {
                           referrerPolicy="no-referrer" 
                           loading="lazy"
                         />
-                        <button 
-                          type="button"
-                          onClick={() => setEditingItem({...editingItem, image: ''})}
-                          className="absolute top-2 right-2 bg-black text-white p-2 rounded-full hover:bg-red-500 transition-colors"
-                        >
-                          <X size={16} />
-                        </button>
+                        <div className="absolute top-2 right-2 flex gap-2">
+                          <button 
+                            type="button"
+                            onClick={() => setEditingItem({...editingItem, image: ''})}
+                            className="bg-black text-white p-2 rounded-full hover:bg-red-500 transition-colors"
+                          >
+                            <X size={16} />
+                          </button>
+                        </div>
                       </div>
                     ) : (
-                      <label className="w-full aspect-video flex flex-col items-center justify-center cursor-pointer hover:bg-black/5 transition-all gap-2">
-                        <ImageIcon size={40} className="text-gray-400" />
-                        <span className="text-[10px] font-black uppercase tracking-widest">Upload Item Image</span>
-                        <input type="file" className="hidden" onChange={handleItemImageUpload} accept="image/*" />
-                      </label>
+                      <div className="w-full">
+                        <label className="aspect-video flex flex-col items-center justify-center cursor-pointer hover:bg-black/5 border-2 border-dashed border-black rounded-2xl transition-all gap-2">
+                          <Upload size={32} className="text-gray-400" />
+                          <span className="text-[10px] font-black uppercase tracking-widest">Upload Image</span>
+                          <input type="file" className="hidden" onChange={handleItemImageUpload} accept="image/*" />
+                        </label>
+                      </div>
                     )}
                   </div>
 
@@ -962,94 +961,96 @@ export default function AdminDashboard() {
                   </div>
 
                   {/* Addons Management */}
-                  <div className="space-y-4">
-                    <label className="block text-[10px] font-black uppercase tracking-widest">Add-ons</label>
-                    <div className="space-y-2">
-                      {(() => {
-                        try {
-                          const addons = JSON.parse(editingItem.addons || '[]');
-                          return Array.isArray(addons) ? addons : [];
-                        } catch (e) {
-                          return [];
-                        }
-                      })().map((addon: { name: string, price: number, available?: boolean }, idx: number) => (
-                        <div key={idx} className="flex gap-2 items-center">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              try {
-                                const addons = JSON.parse(editingItem.addons || '[]');
-                                addons[idx].available = addons[idx].available === false ? true : false;
-                                setEditingItem({...editingItem, addons: JSON.stringify(addons)});
-                              } catch (e) {}
-                            }}
-                            className={`p-2 rounded-xl border-2 transition-all ${
-                              addon.available !== false 
-                                ? 'border-green-500 text-green-500 bg-green-50' 
-                                : 'border-gray-300 text-gray-300 bg-gray-50'
-                            }`}
-                            title={addon.available !== false ? "Add-on Available" : "Add-on Unavailable"}
-                          >
-                            {addon.available !== false ? <Check size={16} strokeWidth={3} /> : <X size={16} strokeWidth={3} />}
-                          </button>
-                          <input 
-                            type="text"
-                            value={addon.name}
-                            onChange={(e) => {
-                              try {
-                                const addons = JSON.parse(editingItem.addons || '[]');
-                                addons[idx].name = e.target.value;
-                                setEditingItem({...editingItem, addons: JSON.stringify(addons)});
-                              } catch (e) {}
-                            }}
-                            className={`flex-1 px-4 py-2 rounded-xl border-2 border-black font-bold text-xs ${addon.available === false ? 'opacity-50' : ''}`}
-                            placeholder="Addon Name"
-                          />
-                          <input 
-                            type="number"
-                            value={addon.price}
-                            onChange={(e) => {
-                              try {
-                                const addons = JSON.parse(editingItem.addons || '[]');
-                                addons[idx].price = Number(e.target.value);
-                                setEditingItem({...editingItem, addons: JSON.stringify(addons)});
-                              } catch (e) {}
-                            }}
-                            className={`w-24 px-4 py-2 rounded-xl border-2 border-black font-bold text-xs ${addon.available === false ? 'opacity-50' : ''}`}
-                            placeholder="₱"
-                          />
-                          <button 
-                            type="button"
-                            onClick={() => {
-                              try {
-                                const addons = JSON.parse(editingItem.addons || '[]');
-                                const newAddons = addons.filter((_: any, i: number) => i !== idx);
-                                setEditingItem({...editingItem, addons: JSON.stringify(newAddons)});
-                              } catch (e) {}
-                            }}
-                            className="p-2 text-red-500 hover:bg-red-50 rounded-xl transition-all"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
-                      ))}
-                      <button 
-                        type="button"
-                        onClick={() => {
+                  {menu.find(c => c.id === editingItem.category_id)?.name !== "SWEET TREATS" && (
+                    <div className="space-y-4">
+                      <label className="block text-[10px] font-black uppercase tracking-widest">Add-ons</label>
+                      <div className="space-y-2">
+                        {(() => {
                           try {
                             const addons = JSON.parse(editingItem.addons || '[]');
-                            addons.push({ name: '', price: 0, available: true });
-                            setEditingItem({...editingItem, addons: JSON.stringify(addons)});
+                            return Array.isArray(addons) ? addons : [];
                           } catch (e) {
-                            setEditingItem({...editingItem, addons: JSON.stringify([{ name: '', price: 0, available: true }])});
+                            return [];
                           }
-                        }}
-                        className="w-full py-2 rounded-xl border-2 border-dashed border-black text-[10px] font-black uppercase tracking-widest hover:bg-black/5 transition-all"
-                      >
-                        + Add Add-on
-                      </button>
+                        })().map((addon: { name: string, price: number, available?: boolean }, idx: number) => (
+                          <div key={idx} className="flex gap-2 items-center">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                try {
+                                  const addons = JSON.parse(editingItem.addons || '[]');
+                                  addons[idx].available = addons[idx].available === false ? true : false;
+                                  setEditingItem({...editingItem, addons: JSON.stringify(addons)});
+                                } catch (e) {}
+                              }}
+                              className={`p-2 rounded-xl border-2 transition-all ${
+                                addon.available !== false 
+                                  ? 'border-green-500 text-green-500 bg-green-50' 
+                                  : 'border-gray-300 text-gray-300 bg-gray-50'
+                              }`}
+                              title={addon.available !== false ? "Add-on Available" : "Add-on Unavailable"}
+                            >
+                              {addon.available !== false ? <Check size={16} strokeWidth={3} /> : <X size={16} strokeWidth={3} />}
+                            </button>
+                            <input 
+                              type="text"
+                              value={addon.name}
+                              onChange={(e) => {
+                                try {
+                                  const addons = JSON.parse(editingItem.addons || '[]');
+                                  addons[idx].name = e.target.value;
+                                  setEditingItem({...editingItem, addons: JSON.stringify(addons)});
+                                } catch (e) {}
+                              }}
+                              className={`flex-1 px-4 py-2 rounded-xl border-2 border-black font-bold text-xs ${addon.available === false ? 'opacity-50' : ''}`}
+                              placeholder="Addon Name"
+                            />
+                            <input 
+                              type="number"
+                              value={addon.price}
+                              onChange={(e) => {
+                                try {
+                                  const addons = JSON.parse(editingItem.addons || '[]');
+                                  addons[idx].price = Number(e.target.value);
+                                  setEditingItem({...editingItem, addons: JSON.stringify(addons)});
+                                } catch (e) {}
+                              }}
+                              className={`w-24 px-4 py-2 rounded-xl border-2 border-black font-bold text-xs ${addon.available === false ? 'opacity-50' : ''}`}
+                              placeholder="₱"
+                            />
+                            <button 
+                              type="button"
+                              onClick={() => {
+                                try {
+                                  const addons = JSON.parse(editingItem.addons || '[]');
+                                  const newAddons = addons.filter((_: any, i: number) => i !== idx);
+                                  setEditingItem({...editingItem, addons: JSON.stringify(newAddons)});
+                                } catch (e) {}
+                              }}
+                              className="p-2 text-red-500 hover:bg-red-50 rounded-xl transition-all"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        ))}
+                        <button 
+                          type="button"
+                          onClick={() => {
+                            try {
+                              const addons = JSON.parse(editingItem.addons || '[]');
+                              addons.push({ name: '', price: 0, available: true });
+                              setEditingItem({...editingItem, addons: JSON.stringify(addons)});
+                            } catch (e) {
+                              setEditingItem({...editingItem, addons: JSON.stringify([{ name: '', price: 0, available: true }])});
+                            }
+                          }}
+                          className="w-full py-2 rounded-xl border-2 border-dashed border-black text-[10px] font-black uppercase tracking-widest hover:bg-black/5 transition-all"
+                        >
+                          + Add Add-on
+                        </button>
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
 
                 <div className="pt-4">

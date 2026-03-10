@@ -102,17 +102,23 @@ try {
     { name: "Rice", price: 30, available: true }
   ]);
 
-  // Update items in categories that are NOT QUICK BITES
+  // Update items in categories that are NOT QUICK BITES or COMFORT FOOD
   db.prepare(`
     UPDATE items SET addons = ? 
-    WHERE category_id NOT IN (SELECT id FROM categories WHERE name = 'QUICK BITES')
+    WHERE category_id NOT IN (SELECT id FROM categories WHERE name IN ('QUICK BITES', 'COMFORT FOOD'))
   `).run(beverageAddons);
 
-  // Update QUICK BITES items
+  // Update QUICK BITES and COMFORT FOOD items
   db.prepare(`
     UPDATE items SET addons = ? 
-    WHERE category_id IN (SELECT id FROM categories WHERE name = 'QUICK BITES')
+    WHERE category_id IN (SELECT id FROM categories WHERE name IN ('QUICK BITES', 'COMFORT FOOD'))
   `).run(foodAddons);
+
+  // Remove addons for SWEET TREATS
+  db.prepare(`
+    UPDATE items SET addons = NULL 
+    WHERE category_id IN (SELECT id FROM categories WHERE name = 'SWEET TREATS')
+  `).run();
 } catch (e) {
   console.error("Migration error (addons):", e);
 }
@@ -240,8 +246,11 @@ if (categoryCount.count === 0) {
       const catInfo = insertCategory.run(cat.name);
       for (const item of cat.items) {
         const i = item as any;
-        // Use foodAddons for QUICK BITES, beverageAddons for others
-        const itemAddons = cat.name === "QUICK BITES" ? foodAddons : beverageAddons;
+        // Use foodAddons for QUICK BITES and COMFORT FOOD, beverageAddons for others, null for SWEET TREATS
+        let itemAddons = (cat.name === "QUICK BITES" || cat.name === "COMFORT FOOD") ? foodAddons : beverageAddons;
+        if (cat.name === "SWEET TREATS") {
+          itemAddons = null;
+        }
         
         insertItem.run(
           catInfo.lastInsertRowid,
@@ -342,13 +351,34 @@ async function startServer() {
   });
 
   app.post("/api/items", (req, res) => {
-    const { category_id, name, price_hot, price_cold, price_fixed, description, image, addons } = req.body;
+    const { category_id, name, price_hot, price_cold, price_fixed, description, image } = req.body;
+    let { addons } = req.body;
+
+    // Default addons if not provided
+    if (!addons) {
+      const category = db.prepare("SELECT name FROM categories WHERE id = ?").get(category_id);
+      if (category) {
+        if (category.name === "QUICK BITES" || category.name === "COMFORT FOOD") {
+          addons = JSON.stringify([{ name: "Rice", price: 30, available: true }]);
+        } else if (category.name === "SWEET TREATS") {
+          addons = null;
+        } else {
+          addons = JSON.stringify([
+            { name: "Hazelnut", price: 30, available: true },
+            { name: "Vanilla", price: 30, available: true },
+            { name: "White chocolate", price: 30, available: true },
+            { name: "Espresso Shot", price: 80, available: true }
+          ]);
+        }
+      }
+    }
+
     const info = db.prepare(`
       INSERT INTO items (category_id, name, price_hot, price_cold, price_fixed, description, image, addons)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(category_id, name, price_hot, price_cold, price_fixed, description, image, addons);
     notifyUpdate("menu_updated");
-    res.json({ id: info.lastInsertRowid, ...req.body });
+    res.json({ id: info.lastInsertRowid, ...req.body, addons });
   });
 
   app.put("/api/items/:id", (req, res) => {
@@ -446,13 +476,24 @@ async function startServer() {
     
     const insertCat = db.prepare("INSERT INTO categories (name) VALUES (?)");
     const insertItem = db.prepare(`
-      INSERT INTO items (category_id, name, price_hot, price_cold, price_fixed, description)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO items (category_id, name, price_hot, price_cold, price_fixed, description, addons)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
 
     const transaction = db.transaction((data) => {
       deleteItems.run();
       deleteCats.run();
+      
+      const beverageAddons = JSON.stringify([
+        { name: "Hazelnut", price: 30, available: true },
+        { name: "Vanilla", price: 30, available: true },
+        { name: "White chocolate", price: 30, available: true },
+        { name: "Espresso Shot", price: 80, available: true }
+      ]);
+      const foodAddons = JSON.stringify([
+        { name: "Rice", price: 30, available: true }
+      ]);
+
       for (const cat of data) {
         const catInfo = insertCat.run(cat.name);
         const catId = catInfo.lastInsertRowid;
@@ -460,7 +501,13 @@ async function startServer() {
           const hot = item.prices?.hot || (typeof item.price === 'object' ? item.price.hot : null);
           const cold = item.prices?.cold || (typeof item.price === 'object' ? item.price.cold : null);
           const fixed = typeof item.price === 'number' ? item.price : null;
-          insertItem.run(catId, item.name, hot, cold, fixed, item.description || "");
+          
+          let itemAddons = (cat.name === "QUICK BITES" || cat.name === "COMFORT FOOD") ? foodAddons : beverageAddons;
+          if (cat.name === "SWEET TREATS") {
+            itemAddons = null;
+          }
+
+          insertItem.run(catId, item.name, hot, cold, fixed, item.description || "", itemAddons);
         }
       }
     });

@@ -353,7 +353,7 @@ export default function CustomerMenu() {
                                 {item.addons && (() => {
                                   try {
                                     const addons = JSON.parse(item.addons);
-                                    return Array.isArray(addons) && addons.length > 0;
+                                    return Array.isArray(addons) && addons.length > 0 && cat.name !== "SWEET TREATS";
                                   } catch (e) {
                                     return false;
                                   }
@@ -393,7 +393,7 @@ export default function CustomerMenu() {
                           {item.addons && (() => {
                             try {
                               const addons = JSON.parse(item.addons);
-                              return Array.isArray(addons) && addons.length > 0;
+                              return Array.isArray(addons) && addons.length > 0 && cat.name !== "SWEET TREATS";
                             } catch (e) {
                               return false;
                             }
