@@ -4,6 +4,7 @@ import { Category, MenuItem } from '../types';
 import { QRCodeSVG } from 'qrcode.react';
 import { Plus, Trash2, Save, Upload, RefreshCw, QrCode, LayoutDashboard, Settings, Coffee, Edit3, X, Image as ImageIcon, ShoppingCart, CheckCircle, Clock, CreditCard, History, Check } from 'lucide-react';
 import { extractMenuFromImage } from '../services/geminiService';
+import { generateMenuItemImage, generateCategoryImage } from '../services/imageService';
 import { motion, AnimatePresence } from 'motion/react';
 import { Order } from '../types';
 import { apiFetch } from '../lib/api';
@@ -23,6 +24,7 @@ export default function AdminDashboard() {
   const [editingItem, setEditingItem] = useState<Partial<MenuItem> | null>(null);
   const [managingAddonsItem, setManagingAddonsItem] = useState<MenuItem | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const isGeneratingRef = React.useRef(false);
 
   const fetchMenu = async () => {
     const res = await apiFetch('/api/menu');
@@ -73,10 +75,73 @@ export default function AdminDashboard() {
   }, []);
 
   useEffect(() => {
-    if (view === 'orders') {
-      fetchOrders();
-    }
-  }, [view]);
+    const generateMissingImages = async () => {
+      if (isGeneratingRef.current || menu.length === 0) return;
+      
+      const allItems = menu.flatMap(c => c.items).filter(i => 
+        !i.image || i.image.startsWith('https://images.unsplash.com/')
+      );
+
+      const allCategories = menu.filter(c => 
+        !c.image || c.image.startsWith('https://images.unsplash.com/')
+      );
+      
+      if (allItems.length === 0 && allCategories.length === 0) return;
+      
+      isGeneratingRef.current = true;
+      console.log(`[BG] Found ${allItems.length} items and ${allCategories.length} categories needing accurate photos.`);
+      
+      // Generate Category Images First
+      for (const cat of allCategories) {
+        try {
+          console.log(`[BG] Generating photo for category: ${cat.name}`);
+          const image = await generateCategoryImage(cat.name);
+          
+          await apiFetch(`/api/categories/${cat.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: cat.name, image }),
+          });
+          
+          console.log(`[BG] Generated photo for category ${cat.name}`);
+          await new Promise(r => setTimeout(r, 2000));
+        } catch (err) {
+          console.error(`[BG] Failed for category ${cat.name}:`, err);
+        }
+      }
+
+      // Generate Item Images
+      for (const item of allItems) {
+        // Re-check if item still needs image (menu might have updated)
+        const currentItem = menu.flatMap(c => c.items).find(i => i.id === item.id);
+        if (!currentItem || (currentItem.image && !currentItem.image.startsWith('https://images.unsplash.com/'))) {
+          continue;
+        }
+
+        try {
+          const category = menu.find(c => c.id === item.category_id);
+          const image = await generateMenuItemImage(item.name, category?.name || 'Menu', item.description);
+          
+          await apiFetch(`/api/items/${item.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...item, image }),
+          });
+          
+          console.log(`[BG] Generated photo for ${item.name}`);
+          // Increased delay to avoid overwhelming the server
+          await new Promise(r => setTimeout(r, 2000));
+        } catch (err) {
+          console.error(`[BG] Failed for ${item.name}:`, err);
+        }
+      }
+      
+      isGeneratingRef.current = false;
+      fetchMenu(); // Refresh to show new images
+    };
+
+    generateMissingImages();
+  }, [menu]);
 
   const updateOrderStatus = async (orderId: number, status: string, isPaid: number) => {
     await apiFetch(`/api/admin/orders/${orderId}`, {
@@ -874,36 +939,37 @@ export default function AdminDashboard() {
               
               <form onSubmit={handleSaveItem} className="space-y-8">
                 <div className="space-y-6">
-                  <div className="flex flex-col items-center gap-4 p-6 border-2 border-dashed border-black rounded-3xl bg-gray-50">
-                    {editingItem.image ? (
-                      <div className="relative w-full aspect-video rounded-2xl overflow-hidden border-2 border-black">
-                        <img 
-                          src={editingItem.image} 
-                          alt="Preview" 
-                          className="w-full h-full object-cover" 
-                          referrerPolicy="no-referrer" 
-                          loading="lazy"
-                        />
-                        <div className="absolute top-2 right-2 flex gap-2">
-                          <button 
-                            type="button"
-                            onClick={() => setEditingItem({...editingItem, image: ''})}
-                            className="bg-black text-white p-2 rounded-full hover:bg-red-500 transition-colors"
-                          >
-                            <X size={16} />
-                          </button>
-                        </div>
+                      <div className="flex flex-col items-center gap-4 p-6 border-2 border-dashed border-black rounded-3xl bg-gray-50">
+                        {editingItem.image ? (
+                          <div className="relative w-full aspect-video rounded-2xl overflow-hidden border-2 border-black">
+                            <img 
+                              src={editingItem.image} 
+                              alt="Preview" 
+                              className="w-full h-full object-cover" 
+                              referrerPolicy="no-referrer" 
+                              loading="lazy"
+                            />
+                            <div className="absolute top-2 right-2 flex gap-2">
+                              <button 
+                                type="button"
+                                onClick={() => setEditingItem({...editingItem, image: ''})}
+                                className="bg-black text-white p-2 rounded-full hover:bg-red-500 transition-colors shadow-lg border-2 border-black"
+                                title="Remove Image"
+                              >
+                                <X size={16} />
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="w-full">
+                            <label className="aspect-video flex flex-col items-center justify-center cursor-pointer hover:bg-black/5 border-2 border-dashed border-black rounded-2xl transition-all gap-2">
+                              <Upload size={32} className="text-gray-400" />
+                              <span className="text-[10px] font-black uppercase tracking-widest">Upload Image</span>
+                              <input type="file" className="hidden" onChange={handleItemImageUpload} accept="image/*" />
+                            </label>
+                          </div>
+                        )}
                       </div>
-                    ) : (
-                      <div className="w-full">
-                        <label className="aspect-video flex flex-col items-center justify-center cursor-pointer hover:bg-black/5 border-2 border-dashed border-black rounded-2xl transition-all gap-2">
-                          <Upload size={32} className="text-gray-400" />
-                          <span className="text-[10px] font-black uppercase tracking-widest">Upload Image</span>
-                          <input type="file" className="hidden" onChange={handleItemImageUpload} accept="image/*" />
-                        </label>
-                      </div>
-                    )}
-                  </div>
 
                   <div>
                     <label className="block text-[10px] font-black uppercase tracking-widest mb-3">Item Name</label>

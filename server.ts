@@ -6,9 +6,27 @@ import fs from "fs";
 import { fileURLToPath } from "url";
 import { createServer } from "http";
 import { Server } from "socket.io";
+import cors from "cors";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Redirect console logs to server.log for debugging
+const originalLog = console.log;
+const originalError = console.error;
+const originalWarn = console.warn;
+
+const logToFile = (level: string, ...args: any[]) => {
+  const message = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg)).join(' ');
+  const logLine = `[${level}] ${new Date().toISOString()} | ${message}\n`;
+  try {
+    fs.appendFileSync(path.resolve(process.cwd(), "server.log"), logLine);
+  } catch (e) {}
+};
+
+console.log = (...args) => { originalLog(...args); logToFile('LOG', ...args); };
+console.error = (...args) => { originalError(...args); logToFile('ERROR', ...args); };
+console.warn = (...args) => { originalWarn(...args); logToFile('WARN', ...args); };
 
 console.log("[SERVER] Module loading...");
 console.log("[SERVER] __dirname:", __dirname);
@@ -20,6 +38,8 @@ let db: any;
 try {
   db = new Database(dbPath);
   console.log("Database initialized successfully");
+  const count = db.prepare("SELECT COUNT(*) as count FROM categories").get() as { count: number };
+  console.log(`[DB] Categories count: ${count.count}`);
 } catch (err) {
   console.error("FAILED TO INITIALIZE DATABASE:", err);
   // Fallback to in-memory if file fails (though this shouldn't happen in this env)
@@ -30,7 +50,8 @@ try {
 db.exec(`
   CREATE TABLE IF NOT EXISTS categories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE
+    name TEXT NOT NULL UNIQUE,
+    image TEXT
   );
 
   CREATE TABLE IF NOT EXISTS items (
@@ -69,6 +90,11 @@ db.exec(`
     FOREIGN KEY (order_id) REFERENCES orders(id)
   );
 `);
+
+// Migration: Add image column to categories if it doesn't exist
+try {
+  db.exec("ALTER TABLE categories ADD COLUMN image TEXT");
+} catch (e) {}
 
 // Migration: Add image column if it doesn't exist (for existing databases)
 try {
@@ -269,6 +295,23 @@ if (categoryCount.count === 0) {
 async function startServer() {
   const app = express();
   const httpServer = createServer(app);
+  
+  // Global Request Logger - MUST BE FIRST
+  app.use((req, res, next) => {
+    const logLine = `[GLOBAL LOG] ${new Date().toISOString()} | ${req.method} ${req.url} | Origin: ${req.headers.origin}\n`;
+    console.log(logLine.trim());
+    try {
+      fs.appendFileSync(path.resolve(process.cwd(), "server.log"), logLine);
+    } catch (e) {}
+    next();
+  });
+
+  // CORS - MUST BE EARLY
+  app.use(cors());
+  
+  // Body Parsing Middleware - EARLY for all API routes
+  app.use(express.json({ limit: '10mb' }));
+
   const io = new Server(httpServer, {
     cors: {
       origin: "*",
@@ -280,14 +323,32 @@ async function startServer() {
   const isProd = process.env.NODE_ENV === 'production';
 
   // Helper to notify all clients of updates
+  let menuUpdateTimeout: NodeJS.Timeout | null = null;
   const notifyUpdate = (type: string, data?: any) => {
     console.log(`[SOCKET] Notifying update: ${type}`);
-    io.emit(type, data);
+    
+    if (type === "menu_updated") {
+      if (menuUpdateTimeout) clearTimeout(menuUpdateTimeout);
+      menuUpdateTimeout = setTimeout(() => {
+        io.emit(type, data);
+        menuUpdateTimeout = null;
+      }, 500); // Debounce menu updates
+    } else {
+      io.emit(type, data);
+    }
   };
 
   // Socket.io connection
   io.on("connection", (socket) => {
     console.log(`[SOCKET] Client connected: ${socket.id}`);
+    
+    socket.on('client_log', (data) => {
+      console.log(`[CLIENT LOG] ${socket.id}:`, data);
+    });
+    
+    socket.on('client_error', (data) => {
+      console.error(`[CLIENT ERROR] ${socket.id}:`, data);
+    });
   });
 
   console.log(`--- Server Starting ---`);
@@ -296,20 +357,20 @@ async function startServer() {
   console.log(`Port: ${PORT}`);
   console.log(`Working Directory: ${process.cwd()}`);
   console.log(`-----------------------`);
-
-  // Global Request Logger - MUST BE FIRST
-  app.use((req, res, next) => {
-    const logLine = `[GLOBAL LOG] ${new Date().toISOString()} | ${req.method} ${req.url} | Origin: ${req.headers.origin}\n`;
-    console.log(logLine.trim());
-    try {
-      fs.appendFileSync(path.resolve(process.cwd(), "server.log"), logLine);
-    } catch (e) {}
+  
+  // API Cache Control and Content Type
+  app.use("/api", (req, res, next) => {
     next();
   });
 
-  // API Routes - Move as high as possible
-  app.get(["/api/menu", "/api/menu/"], (req, res) => {
-    console.log(`HIT: /api/menu | Method: ${req.method} | URL: ${req.url}`);
+  // API Routes - GET routes first (no body parsing needed)
+  app.get("/api/health", (req, res) => {
+    console.log(`[API] Health check: ${req.method} ${req.url}`);
+    res.json({ status: "ok", version: "1.0.2", time: new Date().toISOString() });
+  });
+
+  const getMenu = (req: any, res: any) => {
+    console.log(`[API] HIT: getMenu | Method: ${req.method} | URL: ${req.url}`);
     try {
       const categories = db.prepare("SELECT * FROM categories").all();
       const menu = categories.map((cat: any) => {
@@ -319,34 +380,74 @@ async function startServer() {
       console.log(`[API] /menu returning ${menu.length} categories`);
       res.json(menu);
     } catch (err) {
-      console.error("API Error /menu:", err);
+      console.error("[API] Error /menu:", err);
+      res.status(500).json({ error: "Internal server error", details: err instanceof Error ? err.message : String(err) });
+    }
+  };
+
+  app.get("/api/menu", getMenu);
+  app.get("/api/menu/", getMenu);
+
+  app.get("/api/orders", (req, res) => {
+    const { email, customerId } = req.query;
+    const identifier = customerId || email;
+    console.log(`[API] Get orders for: ${identifier}`);
+    
+    if (!identifier) return res.status(400).json({ error: "Identifier required" });
+
+    try {
+      const orders = db.prepare("SELECT * FROM orders WHERE user_email = ? ORDER BY created_at DESC").all(identifier);
+      const ordersWithItems = orders.map((order: any) => {
+        const items = db.prepare("SELECT * FROM order_items WHERE order_id = ?").all(order.id);
+        const itemsWithAddons = items.map((item: any) => ({
+          ...item,
+          selected_addons: item.selected_addons ? JSON.parse(item.selected_addons) : []
+        }));
+        return { ...order, items: itemsWithAddons };
+      });
+      res.json(ordersWithItems);
+    } catch (err) {
+      console.error("[API] Error fetching orders:", err);
       res.status(500).json({ error: "Internal server error" });
     }
   });
 
-  app.get("/api/health", (req, res) => {
-    console.log("HIT: /api/health");
-    res.json({ status: "ok", time: new Date().toISOString() });
-  });
-
-  app.use(express.json({ limit: '10mb' }));
-
-  // API Cache Control
-  app.use("/api", (req, res, next) => {
-    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-    res.setHeader('Pragma', 'no-cache');
-    res.setHeader('Expires', '0');
-    next();
+  app.get("/api/admin/orders", (req, res) => {
+    const orders = db.prepare("SELECT * FROM orders ORDER BY created_at DESC").all();
+    const ordersWithItems = orders.map((order: any) => {
+      const items = db.prepare("SELECT * FROM order_items WHERE order_id = ?").all(order.id);
+      const itemsWithAddons = items.map((item: any) => ({
+        ...item,
+        selected_addons: item.selected_addons ? JSON.parse(item.selected_addons) : []
+      }));
+      return { ...order, items: itemsWithAddons };
+    });
+    res.json(ordersWithItems);
   });
 
   app.post("/api/categories", (req, res) => {
-    const { name } = req.body;
+    const { name, image } = req.body;
+    console.log(`[API] Create category: ${name}`);
     try {
-      const info = db.prepare("INSERT INTO categories (name) VALUES (?)").run(name);
+      const info = db.prepare("INSERT INTO categories (name, image) VALUES (?, ?)").run(name, image);
       notifyUpdate("menu_updated");
-      res.json({ id: info.lastInsertRowid, name });
+      res.json({ id: info.lastInsertRowid, name, image });
     } catch (e) {
-      res.status(400).json({ error: "Category already exists" });
+      console.error("[API] Error creating category:", e);
+      res.status(400).json({ error: "Category already exists or invalid data" });
+    }
+  });
+
+  app.put("/api/categories/:id", (req, res) => {
+    const { id } = req.params;
+    const { name, image } = req.body;
+    try {
+      db.prepare("UPDATE categories SET name = ?, image = ? WHERE id = ?").run(name, image, id);
+      notifyUpdate("menu_updated");
+      res.json({ success: true });
+    } catch (e) {
+      console.error("[API] Error updating category:", e);
+      res.status(400).json({ error: "Error updating category" });
     }
   });
 
@@ -400,23 +501,6 @@ async function startServer() {
   });
 
   // Order Routes
-  app.get("/api/orders", (req, res) => {
-    const { email, customerId } = req.query;
-    const identifier = customerId || email;
-    if (!identifier) return res.status(400).json({ error: "Identifier required" });
-
-    const orders = db.prepare("SELECT * FROM orders WHERE user_email = ? ORDER BY created_at DESC").all(identifier);
-    const ordersWithItems = orders.map((order: any) => {
-      const items = db.prepare("SELECT * FROM order_items WHERE order_id = ?").all(order.id);
-      const itemsWithAddons = items.map((item: any) => ({
-        ...item,
-        selected_addons: item.selected_addons ? JSON.parse(item.selected_addons) : []
-      }));
-      return { ...order, items: itemsWithAddons };
-    });
-    res.json(ordersWithItems);
-  });
-
   app.post("/api/orders", (req, res) => {
     const { user_email, total, items, payment_method } = req.body;
     
@@ -445,19 +529,6 @@ async function startServer() {
     db.prepare("UPDATE orders SET is_paid = 1, status = 'completed' WHERE id = ?").run(req.params.id);
     notifyUpdate("order_updated", { id: req.params.id, status: 'completed', is_paid: 1 });
     res.json({ success: true });
-  });
-
-  app.get("/api/admin/orders", (req, res) => {
-    const orders = db.prepare("SELECT * FROM orders ORDER BY created_at DESC").all();
-    const ordersWithItems = orders.map((order: any) => {
-      const items = db.prepare("SELECT * FROM order_items WHERE order_id = ?").all(order.id);
-      const itemsWithAddons = items.map((item: any) => ({
-        ...item,
-        selected_addons: item.selected_addons ? JSON.parse(item.selected_addons) : []
-      }));
-      return { ...order, items: itemsWithAddons };
-    });
-    res.json(ordersWithItems);
   });
 
   app.put("/api/admin/orders/:id", (req, res) => {
@@ -561,6 +632,7 @@ async function startServer() {
 
     app.use(express.static(distPath));
     app.get("*", (req, res) => {
+      console.log(`[SPA FALLBACK] ${req.method} ${req.url}`);
       const indexPath = path.resolve(distPath, "index.html");
       if (fs.existsSync(indexPath)) {
         res.sendFile(indexPath);

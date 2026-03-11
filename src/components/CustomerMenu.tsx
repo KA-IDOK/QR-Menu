@@ -82,6 +82,7 @@ export default function CustomerMenu() {
 
   useEffect(() => {
     console.log("Fetching menu...");
+    socket.emit('client_log', { message: "CustomerMenu mounting, fetching menu..." });
     apiFetch('/api/menu')
       .then(res => {
         if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
@@ -312,10 +313,25 @@ export default function CustomerMenu() {
               .filter(cat => activeCategory === null || cat.id === activeCategory)
               .map(cat => (
                 <section key={cat.id}>
-                  {activeCategory === null && (
+                  {activeCategory === null ? (
                     <div className="flex items-center gap-6 mb-8">
+                      {cat.image && (
+                        <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-black shrink-0">
+                          <img src={cat.image} alt={cat.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                        </div>
+                      )}
                       <h3 className="text-2xl font-black text-black uppercase tracking-tight">{cat.name}</h3>
                       <div className="h-1 flex-1 bg-black/5 rounded-full"></div>
+                    </div>
+                  ) : (
+                    <div className="mb-12">
+                      {cat.image && (
+                        <div className="w-full h-48 rounded-[2.5rem] overflow-hidden border-4 border-black mb-6 shadow-xl">
+                          <img src={cat.image} alt={cat.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                        </div>
+                      )}
+                      <h2 className="text-4xl font-black text-black uppercase tracking-tighter">{cat.name}</h2>
+                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.3em] mt-2">Discover our {cat.name.toLowerCase()} selection</p>
                     </div>
                   )}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
