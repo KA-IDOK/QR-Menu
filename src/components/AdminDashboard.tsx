@@ -89,12 +89,16 @@ export default function AdminDashboard() {
       if (allItems.length === 0 && allCategories.length === 0) return;
       
       isGeneratingRef.current = true;
-      console.log(`[BG] Found ${allItems.length} items and ${allCategories.length} categories needing accurate photos.`);
+      const logMsg = `[BG] Found ${allItems.length} items and ${allCategories.length} categories needing accurate photos.`;
+      console.log(logMsg);
+      socket.emit('client_log', { message: logMsg });
       
       // Generate Category Images First
       for (const cat of allCategories) {
         try {
-          console.log(`[BG] Generating photo for category: ${cat.name}`);
+          const msg = `[BG] Generating photo for category: ${cat.name}`;
+          console.log(msg);
+          socket.emit('client_log', { message: msg });
           const image = await generateCategoryImage(cat.name);
           
           await apiFetch(`/api/categories/${cat.id}`, {
@@ -103,10 +107,14 @@ export default function AdminDashboard() {
             body: JSON.stringify({ name: cat.name, image }),
           });
           
-          console.log(`[BG] Generated photo for category ${cat.name}`);
+          const successMsg = `[BG] Generated photo for category ${cat.name}`;
+          console.log(successMsg);
+          socket.emit('client_log', { message: successMsg });
           await new Promise(r => setTimeout(r, 2000));
         } catch (err) {
-          console.error(`[BG] Failed for category ${cat.name}:`, err);
+          const errMsg = `[BG] Failed for category ${cat.name}: ${err instanceof Error ? err.message : String(err)}`;
+          console.error(errMsg);
+          socket.emit('client_log', { message: errMsg, error: true });
         }
       }
 
@@ -120,6 +128,10 @@ export default function AdminDashboard() {
 
         try {
           const category = menu.find(c => c.id === item.category_id);
+          const msg = `[BG] Generating photo for ${item.name}`;
+          console.log(msg);
+          socket.emit('client_log', { message: msg });
+          
           const image = await generateMenuItemImage(item.name, category?.name || 'Menu', item.description);
           
           await apiFetch(`/api/items/${item.id}`, {
@@ -128,11 +140,15 @@ export default function AdminDashboard() {
             body: JSON.stringify({ ...item, image }),
           });
           
-          console.log(`[BG] Generated photo for ${item.name}`);
+          const successMsg = `[BG] Generated photo for ${item.name}`;
+          console.log(successMsg);
+          socket.emit('client_log', { message: successMsg });
           // Increased delay to avoid overwhelming the server
           await new Promise(r => setTimeout(r, 2000));
         } catch (err) {
-          console.error(`[BG] Failed for ${item.name}:`, err);
+          const errMsg = `[BG] Failed for ${item.name}: ${err instanceof Error ? err.message : String(err)}`;
+          console.error(errMsg);
+          socket.emit('client_log', { message: errMsg, error: true });
         }
       }
       

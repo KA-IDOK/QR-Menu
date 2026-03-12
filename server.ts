@@ -19,14 +19,15 @@ const originalWarn = console.warn;
 const logToFile = (level: string, ...args: any[]) => {
   const message = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg)).join(' ');
   const logLine = `[${level}] ${new Date().toISOString()} | ${message}\n`;
+  originalLog.apply(console, args);
   try {
     fs.appendFileSync(path.resolve(process.cwd(), "server.log"), logLine);
   } catch (e) {}
 };
 
-console.log = (...args) => { originalLog(...args); logToFile('LOG', ...args); };
-console.error = (...args) => { originalError(...args); logToFile('ERROR', ...args); };
-console.warn = (...args) => { originalWarn(...args); logToFile('WARN', ...args); };
+console.log = (...args) => logToFile('LOG', ...args);
+console.error = (...args) => logToFile('ERROR', ...args);
+console.warn = (...args) => logToFile('WARN', ...args);
 
 console.log("[SERVER] Module loading...");
 console.log("[SERVER] __dirname:", __dirname);
@@ -38,15 +39,13 @@ let db: any;
 try {
   db = new Database(dbPath);
   console.log("Database initialized successfully");
-  const count = db.prepare("SELECT COUNT(*) as count FROM categories").get() as { count: number };
-  console.log(`[DB] Categories count: ${count.count}`);
 } catch (err) {
-  console.error("FAILED TO INITIALIZE DATABASE:", err);
-  // Fallback to in-memory if file fails (though this shouldn't happen in this env)
+  console.error("FAILED TO OPEN DATABASE FILE:", err);
   db = new Database(":memory:");
+  console.log("Using in-memory database fallback");
 }
 
-// Initialize database
+// Initialize database schema
 db.exec(`
   CREATE TABLE IF NOT EXISTS categories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -90,6 +89,14 @@ db.exec(`
     FOREIGN KEY (order_id) REFERENCES orders(id)
   );
 `);
+
+// Log database state
+try {
+  const count = db.prepare("SELECT COUNT(*) as count FROM categories").get() as { count: number };
+  console.log(`[DB] Categories count: ${count.count}`);
+} catch (err) {
+  console.error("[DB] Error checking categories count:", err);
+}
 
 // Migration: Add image column to categories if it doesn't exist
 try {
@@ -152,6 +159,7 @@ try {
 // Seed initial data if empty
 const categoryCount = db.prepare("SELECT COUNT(*) as count FROM categories").get() as { count: number };
 if (categoryCount.count === 0) {
+  console.log("[DB] Seeding initial data...");
   const beverageAddons = JSON.stringify([
     { name: "Hazelnut", price: 30, available: true },
     { name: "Vanilla", price: 30, available: true },
@@ -290,11 +298,21 @@ if (categoryCount.count === 0) {
       }
     }
   })();
+  console.log("[DB] Seeding completed.");
 }
 
 async function startServer() {
   const app = express();
   const httpServer = createServer(app);
+  
+  httpServer.on('request', (req, res) => {
+    const logLine = `[HTTP REQ] ${new Date().toISOString()} | ${req.method} ${req.url}\n`;
+    try {
+      fs.appendFileSync(path.resolve(process.cwd(), "debug.log"), logLine);
+    } catch (e) {}
+  });
+
+  console.log("[SERVER] Registering global logger...");
   
   // Global Request Logger - MUST BE FIRST
   app.use((req, res, next) => {
@@ -340,7 +358,23 @@ async function startServer() {
 
   // Socket.io connection
   io.on("connection", (socket) => {
-    console.log(`[SOCKET] Client connected: ${socket.id}`);
+    console.log(`[SOCKET] Client connected: ${socket.id} | Total clients: ${io.engine.clientsCount}`);
+    
+    const testInterval = setInterval(() => {
+      socket.emit('test_event', { time: Date.now() });
+    }, 2000);
+
+    socket.on("disconnect", (reason) => {
+      clearInterval(testInterval);
+      console.log(`[SOCKET] Client disconnected: ${socket.id} | Reason: ${reason} | Total clients: ${io.engine.clientsCount}`);
+    });
+    
+    // Send a ping to the client
+    socket.emit('server_ping', { time: Date.now() });
+    
+    socket.onAny((event, ...args) => {
+      console.log(`[SOCKET EVENT] ${socket.id} | ${event}:`, args);
+    });
     
     socket.on('client_log', (data) => {
       console.log(`[CLIENT LOG] ${socket.id}:`, data);
@@ -365,8 +399,13 @@ async function startServer() {
 
   // API Routes - GET routes first (no body parsing needed)
   app.get("/api/health", (req, res) => {
-    console.log(`[API] Health check: ${req.method} ${req.url}`);
+    console.log(`[API] Health check HIT: ${req.method} ${req.url}`);
     res.json({ status: "ok", version: "1.0.2", time: new Date().toISOString() });
+  });
+
+  app.post("/api/log", (req, res) => {
+    console.log(`[CLIENT FETCH LOG]:`, req.body);
+    res.json({ status: "ok" });
   });
 
   const getMenu = (req: any, res: any) => {
@@ -441,13 +480,15 @@ async function startServer() {
   app.put("/api/categories/:id", (req, res) => {
     const { id } = req.params;
     const { name, image } = req.body;
+    console.log(`[API] Updating category ${id}: ${name} (image length: ${image?.length || 0})`);
     try {
-      db.prepare("UPDATE categories SET name = ?, image = ? WHERE id = ?").run(name, image, id);
+      const result = db.prepare("UPDATE categories SET name = ?, image = ? WHERE id = ?").run(name, image, id);
+      console.log(`[API] Category update result:`, result);
       notifyUpdate("menu_updated");
       res.json({ success: true });
     } catch (e) {
       console.error("[API] Error updating category:", e);
-      res.status(400).json({ error: "Error updating category" });
+      res.status(500).json({ error: "Error updating category", details: e instanceof Error ? e.message : String(e) });
     }
   });
 
@@ -485,13 +526,20 @@ async function startServer() {
   app.put("/api/items/:id", (req, res) => {
     const { id } = req.params;
     const { name, price_hot, price_cold, price_fixed, description, available, image, addons } = req.body;
-    db.prepare(`
-      UPDATE items 
-      SET name = ?, price_hot = ?, price_cold = ?, price_fixed = ?, description = ?, available = ?, image = ?, addons = ?
-      WHERE id = ?
-    `).run(name, price_hot, price_cold, price_fixed, description, available, image, addons, id);
-    notifyUpdate("menu_updated");
-    res.json({ success: true });
+    console.log(`[API] Updating item ${id}: ${name} (image length: ${image?.length || 0})`);
+    try {
+      const result = db.prepare(`
+        UPDATE items 
+        SET name = ?, price_hot = ?, price_cold = ?, price_fixed = ?, description = ?, available = ?, image = ?, addons = ?
+        WHERE id = ?
+      `).run(name, price_hot, price_cold, price_fixed, description, available, image, addons, id);
+      console.log(`[API] Item update result:`, result);
+      notifyUpdate("menu_updated");
+      res.json({ success: true });
+    } catch (e) {
+      console.error("[API] Error updating item:", e);
+      res.status(500).json({ error: "Error updating item", details: e instanceof Error ? e.message : String(e) });
+    }
   });
 
   app.delete("/api/items/:id", (req, res) => {
