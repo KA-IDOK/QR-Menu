@@ -1,24 +1,83 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Component, ErrorInfo, ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Category, MenuItem } from '../types';
+import { Category, MenuItem, Order } from '../types';
 import { QRCodeSVG } from 'qrcode.react';
-import { Plus, Trash2, Save, Upload, RefreshCw, QrCode, LayoutDashboard, Settings, Coffee, Edit3, X, Image as ImageIcon, ShoppingCart, CheckCircle, Clock, CreditCard, History, Check } from 'lucide-react';
+import { Plus, Trash2, Save, Upload, RefreshCw, QrCode, LayoutDashboard, Settings, Coffee, Edit3, X, Image as ImageIcon, ShoppingCart, CheckCircle, Clock, CreditCard, History, Check, AlertCircle } from 'lucide-react';
 import { extractMenuFromImage } from '../services/geminiService';
 import { generateMenuItemImage, generateCategoryImage } from '../services/imageService';
 import { motion, AnimatePresence } from 'motion/react';
-import { Order } from '../types';
-import { apiFetch } from '../lib/api';
-import socket from '../lib/socket';
+import { db, auth, handleFirestoreError, OperationType, signInWithGoogle } from '../firebase';
+import { onAuthStateChanged, signOut, User } from 'firebase/auth';
+import { 
+  collection, 
+  onSnapshot, 
+  doc, 
+  addDoc, 
+  updateDoc, 
+  deleteDoc, 
+  query, 
+  orderBy, 
+  serverTimestamp,
+  writeBatch,
+  getDocs
+} from 'firebase/firestore';
+
+// Error Boundary Component
+class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean, error: Error | null }> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error("ErrorBoundary caught an error", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
+          <div className="bg-white p-8 rounded-3xl shadow-xl border-2 border-red-500 max-w-md w-full text-center">
+            <AlertCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
+            <h2 className="text-2xl font-black uppercase tracking-tight mb-2">Something went wrong</h2>
+            <p className="text-gray-600 mb-6">The application encountered an error. Please try refreshing the page.</p>
+            <button 
+              onClick={() => window.location.reload()}
+              className="bg-black text-white px-8 py-3 rounded-xl font-black uppercase tracking-widest hover:bg-gray-800 transition-all"
+            >
+              Reload App
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 export default function AdminDashboard() {
+  return (
+    <ErrorBoundary>
+      <AdminDashboardContent />
+    </ErrorBoundary>
+  );
+}
+
+function AdminDashboardContent() {
   const navigate = useNavigate();
+  const [user, setUser] = useState<User | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
   const [menu, setMenu] = useState<Category[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [isSeeding, setIsSeeding] = useState(false);
   const [view, setView] = useState<'items' | 'qr' | 'orders'>('items');
-  const [activeAdminCategory, setActiveAdminCategory] = useState<number | null>(null);
-  const [isConnected, setIsConnected] = useState(socket.connected);
+  const [activeAdminCategory, setActiveAdminCategory] = useState<string | null>(null);
   
   // Editor State
   const [editingItem, setEditingItem] = useState<Partial<MenuItem> | null>(null);
@@ -26,55 +85,61 @@ export default function AdminDashboard() {
   const [isSaving, setIsSaving] = useState(false);
   const isGeneratingRef = React.useRef(false);
 
-  const fetchMenu = async () => {
-    const res = await apiFetch('/api/menu');
-    const data = await res.json();
-    setMenu(data);
-    setLoading(false);
-  };
-
-  const fetchOrders = async () => {
-    const res = await apiFetch('/api/admin/orders');
-    const data = await res.json();
-    setOrders(data);
-  };
-
   useEffect(() => {
-    fetchMenu();
-    fetchOrders();
-
-    const onConnect = () => setIsConnected(true);
-    const onDisconnect = () => setIsConnected(false);
-
-    socket.on('connect', onConnect);
-    socket.on('disconnect', onDisconnect);
-
-    // Socket.io listeners for real-time updates
-    socket.on('order_created', () => {
-      console.log('[SOCKET] New order received, fetching...');
-      fetchOrders();
+    const unsub = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      // Check if user is admin (hardcoded for now to match rules)
+      setIsAdmin(u?.email === 'renzohermano31@gmail.com');
+      setAuthLoading(false);
     });
-
-    socket.on('order_updated', () => {
-      console.log('[SOCKET] Order updated, fetching...');
-      fetchOrders();
-    });
-
-    socket.on('menu_updated', () => {
-      console.log('[SOCKET] Menu updated, fetching...');
-      fetchMenu();
-    });
-
-    return () => {
-      socket.off('connect', onConnect);
-      socket.off('disconnect', onDisconnect);
-      socket.off('order_created');
-      socket.off('order_updated');
-      socket.off('menu_updated');
-    };
+    return () => unsub();
   }, []);
 
   useEffect(() => {
+    if (!isAdmin) return;
+    // Real-time categories and items
+    const categoriesUnsub = onSnapshot(collection(db, 'categories'), (catSnap) => {
+      const categoriesData = catSnap.docs.map(doc => ({ id: doc.id, ...doc.data(), items: [] } as Category));
+      
+      const itemsUnsub = onSnapshot(collection(db, 'items'), (itemSnap) => {
+        const itemsData = itemSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as MenuItem));
+        
+        const fullMenu = categoriesData.map(cat => ({
+          ...cat,
+          items: itemsData.filter(item => item.category_id === cat.id)
+        }));
+        
+        setMenu(fullMenu);
+        setLoading(false);
+      }, (err) => handleFirestoreError(err, OperationType.LIST, 'items'));
+
+      return () => itemsUnsub();
+    }, (err) => handleFirestoreError(err, OperationType.LIST, 'categories'));
+
+    // Real-time orders
+    const ordersQuery = query(collection(db, 'orders'), orderBy('created_at', 'desc'));
+    const ordersUnsub = onSnapshot(ordersQuery, (snap) => {
+      const ordersData = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
+      setOrders(ordersData);
+    }, (err) => handleFirestoreError(err, OperationType.LIST, 'orders'));
+
+    return () => {
+      categoriesUnsub();
+      ordersUnsub();
+    };
+  }, [isAdmin]);
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      navigate('/');
+    } catch (err) {
+      console.error("Logout error", err);
+    }
+  };
+
+  useEffect(() => {
+    if (!isAdmin) return;
     const generateMissingImages = async () => {
       if (isGeneratingRef.current || menu.length === 0) return;
       
@@ -89,38 +154,25 @@ export default function AdminDashboard() {
       if (allItems.length === 0 && allCategories.length === 0) return;
       
       isGeneratingRef.current = true;
-      const logMsg = `[BG] Found ${allItems.length} items and ${allCategories.length} categories needing accurate photos.`;
-      console.log(logMsg);
-      socket.emit('client_log', { message: logMsg });
+      console.log(`[BG] Found ${allItems.length} items and ${allCategories.length} categories needing accurate photos.`);
       
       // Generate Category Images First
       for (const cat of allCategories) {
         try {
-          const msg = `[BG] Generating photo for category: ${cat.name}`;
-          console.log(msg);
-          socket.emit('client_log', { message: msg });
+          console.log(`[BG] Generating photo for category: ${cat.name}`);
           const image = await generateCategoryImage(cat.name);
           
-          await apiFetch(`/api/categories/${cat.id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: cat.name, image }),
-          });
+          await updateDoc(doc(db, 'categories', cat.id), { image });
           
-          const successMsg = `[BG] Generated photo for category ${cat.name}`;
-          console.log(successMsg);
-          socket.emit('client_log', { message: successMsg });
+          console.log(`[BG] Generated photo for category ${cat.name}`);
           await new Promise(r => setTimeout(r, 2000));
         } catch (err) {
-          const errMsg = `[BG] Failed for category ${cat.name}: ${err instanceof Error ? err.message : String(err)}`;
-          console.error(errMsg);
-          socket.emit('client_log', { message: errMsg, error: true });
+          console.error(`[BG] Failed for category ${cat.name}:`, err);
         }
       }
 
       // Generate Item Images
       for (const item of allItems) {
-        // Re-check if item still needs image (menu might have updated)
         const currentItem = menu.flatMap(c => c.items).find(i => i.id === item.id);
         if (!currentItem || (currentItem.image && !currentItem.image.startsWith('https://images.unsplash.com/'))) {
           continue;
@@ -128,44 +180,29 @@ export default function AdminDashboard() {
 
         try {
           const category = menu.find(c => c.id === item.category_id);
-          const msg = `[BG] Generating photo for ${item.name}`;
-          console.log(msg);
-          socket.emit('client_log', { message: msg });
-          
           const image = await generateMenuItemImage(item.name, category?.name || 'Menu', item.description);
           
-          await apiFetch(`/api/items/${item.id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ...item, image }),
-          });
+          await updateDoc(doc(db, 'items', item.id), { image });
           
-          const successMsg = `[BG] Generated photo for ${item.name}`;
-          console.log(successMsg);
-          socket.emit('client_log', { message: successMsg });
-          // Increased delay to avoid overwhelming the server
+          console.log(`[BG] Generated photo for ${item.name}`);
           await new Promise(r => setTimeout(r, 2000));
         } catch (err) {
-          const errMsg = `[BG] Failed for ${item.name}: ${err instanceof Error ? err.message : String(err)}`;
-          console.error(errMsg);
-          socket.emit('client_log', { message: errMsg, error: true });
+          console.error(`[BG] Failed for ${item.name}:`, err);
         }
       }
       
       isGeneratingRef.current = false;
-      fetchMenu(); // Refresh to show new images
     };
 
     generateMissingImages();
   }, [menu]);
 
-  const updateOrderStatus = async (orderId: number, status: string, isPaid: number) => {
-    await apiFetch(`/api/admin/orders/${orderId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status, is_paid: isPaid }),
-    });
-    fetchOrders();
+  const updateOrderStatus = async (orderId: string, status: string, isPaid: boolean) => {
+    try {
+      await updateDoc(doc(db, 'orders', orderId), { status, is_paid: isPaid });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `orders/${orderId}`);
+    }
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -178,15 +215,35 @@ export default function AdminDashboard() {
       const base64 = (reader.result as string).split(',')[1];
       try {
         const extracted = await extractMenuFromImage(base64);
-        await apiFetch('/api/seed', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(extracted),
-        });
-        await fetchMenu();
+        
+        // Seed to Firestore
+        const batch = writeBatch(db);
+        
+        for (const cat of extracted.categories) {
+          const catRef = doc(collection(db, 'categories'));
+          batch.set(catRef, { name: cat.name });
+          
+          for (const item of cat.items) {
+            const itemRef = doc(collection(db, 'items'));
+            const hot = item.prices?.hot || (typeof item.price === 'object' ? item.price.hot : null);
+            const cold = item.prices?.cold || (typeof item.price === 'object' ? item.price.cold : null);
+            const fixed = typeof item.price === 'number' ? item.price : null;
+            
+            batch.set(itemRef, {
+              category_id: catRef.id,
+              name: item.name,
+              price_hot: hot,
+              price_cold: cold,
+              price_fixed: fixed,
+              description: item.description || "",
+              available: true
+            });
+          }
+        }
+        
+        await batch.commit();
       } catch (err) {
-        console.error(err);
-        alert('Failed to extract menu. Please try again.');
+        handleFirestoreError(err, OperationType.WRITE, 'bulk_seed');
       } finally {
         setIsSeeding(false);
       }
@@ -194,26 +251,23 @@ export default function AdminDashboard() {
     reader.readAsDataURL(file);
   };
 
-  const updateItemAvailability = async (id: number, available: number, addons?: string) => {
-    const item = menu.flatMap(c => c.items).find(i => i.id === id);
-    if (!item) return;
-    
-    await apiFetch(`/api/items/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...item, available, addons: addons ?? item.addons }),
-    });
-    fetchMenu();
+  const updateItemAvailability = async (id: string, available: boolean, addons?: string) => {
+    try {
+      const updateData: any = { available };
+      if (addons !== undefined) updateData.addons = addons;
+      await updateDoc(doc(db, 'items', id), updateData);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `items/${id}`);
+    }
   };
 
-  const toggleAvailability = async (item: MenuItem) => {
-    await updateItemAvailability(item.id, item.available ? 0 : 1);
-  };
-
-  const deleteItem = async (id: number) => {
+  const deleteItem = async (id: string) => {
     if (!confirm('Are you sure?')) return;
-    await apiFetch(`/api/items/${id}`, { method: 'DELETE' });
-    fetchMenu();
+    try {
+      await deleteDoc(doc(db, 'items', id));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `items/${id}`);
+    }
   };
 
   const handleSaveItem = async (e: React.FormEvent) => {
@@ -222,31 +276,26 @@ export default function AdminDashboard() {
     
     setIsSaving(true);
     try {
-      const method = editingItem.id ? 'PUT' : 'POST';
-      const url = editingItem.id ? `/api/items/${editingItem.id}` : '/api/items';
-      
-      await apiFetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editingItem),
-      });
-      
-      await fetchMenu();
+      if (editingItem.id) {
+        const { id, ...data } = editingItem;
+        await updateDoc(doc(db, 'items', id), data);
+      } else {
+        await addDoc(collection(db, 'items'), editingItem);
+      }
       setEditingItem(null);
     } catch (err) {
-      console.error(err);
-      alert('Failed to save item');
+      handleFirestoreError(err, editingItem.id ? OperationType.UPDATE : OperationType.CREATE, `items/${editingItem.id || 'new'}`);
     } finally {
       setIsSaving(false);
     }
   };
 
-  const openAddModal = (categoryId: number) => {
+  const openAddModal = (categoryId: string) => {
     setEditingItem({
       category_id: categoryId,
       name: '',
       price_fixed: 0,
-      available: 1,
+      available: true,
       description: '',
       image: ''
     });
@@ -266,7 +315,58 @@ export default function AdminDashboard() {
 
   const customerUrl = window.location.origin;
 
-  if (loading) return <div className="p-8">Loading...</div>;
+  if (authLoading) return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="animate-pulse flex flex-col items-center">
+        <Coffee className="w-12 h-12 text-black mb-4" />
+        <p className="text-black font-black uppercase tracking-widest text-xs">Verifying Admin...</p>
+      </div>
+    </div>
+  );
+
+  if (!isAdmin) return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 p-6">
+      <div className="bg-white p-12 rounded-[3rem] shadow-2xl border-4 border-black max-w-md w-full text-center">
+        <div className="w-24 h-24 bg-black rounded-full flex items-center justify-center mx-auto mb-8 shadow-xl">
+          <Coffee className="text-white w-12 h-12" />
+        </div>
+        <h2 className="text-4xl font-black uppercase tracking-tighter mb-4">Admin Portal</h2>
+        <p className="text-gray-500 mb-10 font-bold uppercase tracking-widest text-xs">Authorized Personnel Only</p>
+        
+        {user ? (
+          <div className="space-y-6">
+            <div className="p-4 bg-red-50 border-2 border-red-200 rounded-2xl">
+              <p className="text-red-600 font-bold text-sm">Access Denied</p>
+              <p className="text-red-400 text-[10px] font-bold uppercase tracking-widest mt-1">{user.email}</p>
+            </div>
+            <button 
+              onClick={handleLogout}
+              className="w-full bg-black text-white py-5 rounded-2xl font-black uppercase tracking-widest hover:bg-gray-800 transition-all shadow-xl"
+            >
+              Sign Out
+            </button>
+          </div>
+        ) : (
+          <button 
+            onClick={signInWithGoogle}
+            className="w-full bg-black text-white py-5 rounded-2xl font-black uppercase tracking-widest hover:bg-gray-800 transition-all shadow-xl flex items-center justify-center gap-3"
+          >
+            <img src="https://www.google.com/favicon.ico" className="w-5 h-5 invert" alt="Google" />
+            Sign in with Google
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
+  if (loading) return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="animate-pulse flex flex-col items-center">
+        <RefreshCw className="w-12 h-12 text-black mb-4 animate-spin" />
+        <p className="text-black font-black uppercase tracking-widest text-xs">Loading Dashboard...</p>
+      </div>
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
@@ -289,9 +389,9 @@ export default function AdminDashboard() {
         
         <nav className="space-y-2 flex-1">
           <div className="px-4 py-2 mb-4 flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
             <span className="text-[10px] uppercase tracking-widest font-bold text-white/50">
-              {isConnected ? 'Live Connection' : 'Offline'}
+              Live Connection
             </span>
           </div>
           <button 
@@ -323,6 +423,13 @@ export default function AdminDashboard() {
             <span className="font-bold uppercase text-[10px] tracking-widest">Import Image</span>
             <input type="file" className="hidden" onChange={handleFileUpload} accept="image/*" />
           </label>
+          <button 
+            onClick={handleLogout}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-red-500/10 text-red-400 hover:text-red-500 transition-all mt-2"
+          >
+            <X size={20} />
+            <span className="font-bold uppercase text-[10px] tracking-widest">Sign Out</span>
+          </button>
         </div>
       </aside>
 
@@ -479,7 +586,7 @@ export default function AdminDashboard() {
                         
                         <div className="flex items-center gap-2 relative z-10">
                           <button 
-                            onClick={() => toggleAvailability(item)}
+                            onClick={() => updateItemAvailability(item.id, !item.available)}
                             className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all border-2 ${
                               item.available 
                                 ? 'bg-green-500 text-white border-green-500 hover:bg-green-600' 
@@ -516,7 +623,7 @@ export default function AdminDashboard() {
                 <p className="text-[#4A3728] font-bold uppercase tracking-[0.3em] text-[10px] mt-2">Real-time order tracking & status</p>
               </div>
               <button 
-                onClick={fetchOrders}
+                onClick={() => window.location.reload()}
                 className="p-3 bg-black text-white rounded-full hover:bg-gray-800 transition-all active:scale-95"
               >
                 <RefreshCw size={20} />
@@ -615,13 +722,13 @@ export default function AdminDashboard() {
                               <label className="text-[10px] font-black uppercase tracking-widest text-gray-400 ml-2">Payment Status</label>
                               <div className="flex gap-2">
                                 <button 
-                                  onClick={() => updateOrderStatus(order.id, order.status, 0)}
+                                  onClick={() => updateOrderStatus(order.id, order.status, false)}
                                   className={`flex-1 py-3 rounded-xl font-black uppercase text-[10px] tracking-widest border-2 transition-all ${!order.is_paid ? 'bg-red-500 text-white border-red-500' : 'bg-white text-gray-400 border-gray-200 hover:border-black hover:text-black'}`}
                                 >
                                   Unpaid
                                 </button>
                                 <button 
-                                  onClick={() => updateOrderStatus(order.id, order.status, 1)}
+                                  onClick={() => updateOrderStatus(order.id, order.status, true)}
                                   className={`flex-1 py-3 rounded-xl font-black uppercase text-[10px] tracking-widest border-2 transition-all ${order.is_paid ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-white text-gray-400 border-gray-200 hover:border-black hover:text-black'}`}
                                 >
                                   Paid
@@ -630,8 +737,8 @@ export default function AdminDashboard() {
                             </div>
 
                             <div className="mt-auto pt-4 flex items-center justify-between text-[10px] font-bold text-gray-400 uppercase tracking-widest px-2">
-                              <span>{new Date(order.created_at).toLocaleDateString()}</span>
-                              <span>{new Date(order.created_at).toLocaleTimeString()}</span>
+                              <span>{order.created_at?.toDate ? order.created_at.toDate().toLocaleDateString() : new Date(order.created_at).toLocaleDateString()}</span>
+                              <span>{order.created_at?.toDate ? order.created_at.toDate().toLocaleTimeString() : new Date(order.created_at).toLocaleTimeString()}</span>
                             </div>
                           </div>
                         </div>
@@ -684,7 +791,8 @@ export default function AdminDashboard() {
                       orders
                         .filter(o => o.is_paid && o.status === 'completed')
                         .reduce((groups, order) => {
-                          const date = new Date(order.created_at).toLocaleDateString(undefined, { 
+                          const dateObj = order.created_at?.toDate ? order.created_at.toDate() : new Date(order.created_at);
+                          const date = dateObj.toLocaleDateString(undefined, { 
                             weekday: 'long', 
                             year: 'numeric', 
                             month: 'long', 
@@ -696,13 +804,17 @@ export default function AdminDashboard() {
                           return groups;
                         }, {} as Record<string, { orders: Order[], total: number }>)
                     )
-                    .sort((a, b) => new Date(b[1].orders[0].created_at).getTime() - new Date(a[1].orders[0].created_at).getTime())
+                    .sort((a, b) => {
+                      const dateA = a[1].orders[0].created_at?.toDate ? a[1].orders[0].created_at.toDate().getTime() : new Date(a[1].orders[0].created_at).getTime();
+                      const dateB = b[1].orders[0].created_at?.toDate ? b[1].orders[0].created_at.toDate().getTime() : new Date(b[1].orders[0].created_at).getTime();
+                      return dateB - dateA;
+                    })
                     .map(([date, group]) => (
                       <div key={date} className="bg-gray-50/50 p-8 rounded-[3rem] border-2 border-black/5">
                         <div className="flex items-center justify-between mb-8 pb-4 border-b-2 border-black/5">
                           <div className="flex items-center gap-4">
                             <div className="w-10 h-10 bg-black text-white rounded-2xl flex items-center justify-center font-black text-xs">
-                              {new Date(group.orders[0].created_at).getDate()}
+                              {(group.orders[0].created_at?.toDate ? group.orders[0].created_at.toDate() : new Date(group.orders[0].created_at)).getDate()}
                             </div>
                             <div>
                               <h4 className="text-xl font-black uppercase tracking-tighter">{date}</h4>
@@ -725,7 +837,9 @@ export default function AdminDashboard() {
                                     </div>
                                     <div>
                                       <h3 className="text-lg font-black uppercase tracking-tighter">Order #{order.id}</h3>
-                                      <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">{new Date(order.created_at).toLocaleTimeString()} • {order.user_email}</p>
+                                      <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">
+                                        {(order.created_at?.toDate ? order.created_at.toDate() : new Date(order.created_at)).toLocaleTimeString()} • {order.user_email}
+                                      </p>
                                     </div>
                                     {order.payment_method && (
                                       <span className="bg-black text-white text-[7px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest">
@@ -744,7 +858,7 @@ export default function AdminDashboard() {
                                 <div className="flex flex-col items-end justify-center">
                                   <span className="text-xl font-black">₱{order.total}</span>
                                   <button 
-                                    onClick={() => updateOrderStatus(order.id, order.status, 0)}
+                                    onClick={() => updateOrderStatus(order.id, order.status, false)}
                                     className="mt-2 text-[8px] font-black uppercase tracking-widest text-red-500 hover:underline"
                                   >
                                     Mark as Unpaid

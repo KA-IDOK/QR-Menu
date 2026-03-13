@@ -1,10 +1,57 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Component, ErrorInfo, ReactNode } from 'react';
 import { Category, MenuItem, Order } from '../types';
-import { Coffee, Info, ChevronRight, ShoppingBag, X, Plus, Minus, Trash2, History, CreditCard, RefreshCw, ClipboardList, Clock, Edit3 } from 'lucide-react';
+import { Coffee, Info, ChevronRight, ShoppingBag, X, Plus, Minus, Trash2, History, CreditCard, RefreshCw, ClipboardList, Clock, Edit3, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
-import { apiFetch } from '../lib/api';
-import socket from '../lib/socket';
+import { db, auth, handleFirestoreError, OperationType } from '../firebase';
+import { 
+  collection, 
+  onSnapshot, 
+  doc, 
+  addDoc, 
+  updateDoc, 
+  query, 
+  where, 
+  orderBy, 
+  serverTimestamp 
+} from 'firebase/firestore';
+
+// Error Boundary Component
+class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean, error: Error | null }> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error("ErrorBoundary caught an error", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-white p-4">
+          <div className="bg-white p-8 rounded-3xl shadow-xl border-2 border-red-500 max-w-md w-full text-center">
+            <AlertCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
+            <h2 className="text-2xl font-black uppercase tracking-tight mb-2">Something went wrong</h2>
+            <p className="text-gray-600 mb-6">The application encountered an error. Please try refreshing the page.</p>
+            <button 
+              onClick={() => window.location.reload()}
+              className="bg-black text-white px-8 py-3 rounded-xl font-black uppercase tracking-widest hover:bg-gray-800 transition-all"
+            >
+              Reload App
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 interface CartItem extends MenuItem {
   quantity: number;
@@ -14,9 +61,17 @@ interface CartItem extends MenuItem {
 }
 
 export default function CustomerMenu() {
+  return (
+    <ErrorBoundary>
+      <CustomerMenuContent />
+    </ErrorBoundary>
+  );
+}
+
+function CustomerMenuContent() {
   const [menu, setMenu] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeCategory, setActiveCategory] = useState<number | null>(null);
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [logoClicks, setLogoClicks] = useState(0);
   const [showAdminModal, setShowAdminModal] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
@@ -47,83 +102,40 @@ export default function CustomerMenu() {
 
   const navigate = useNavigate();
 
-  const handleLogoClick = () => {
-    const newCount = logoClicks + 1;
-    if (newCount === 3) {
-      setLogoClicks(0);
-      setShowAdminModal(true);
-    } else {
-      setLogoClicks(newCount);
-      setTimeout(() => setLogoClicks(0), 2000);
-    }
-  };
-
-  const handleAdminSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (adminPassword === "admin") {
-      setShowAdminModal(false);
-      setAdminPassword('');
-      navigate('/admin');
-    } else {
-      setAdminError(true);
-      setTimeout(() => setAdminError(false), 2000);
-    }
-  };
-
-  const fetchOrders = () => {
-    apiFetch(`/api/orders?customerId=${customerId}`)
-      .then(res => {
-        if (!res.ok) throw new Error(`Failed to fetch orders: ${res.status}`);
-        return res.json();
-      })
-      .then(data => setOrders(data))
-      .catch(err => console.error("Error fetching orders:", err));
-  };
-
   useEffect(() => {
-    console.log("Fetching menu...");
-    socket.emit('client_log', { message: "CustomerMenu mounting, fetching menu..." });
-    apiFetch('/api/menu')
-      .then(res => {
-        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
-        return res.json();
-      })
-      .then(data => {
-        console.log("Menu fetched:", data);
-        setMenu(data);
-        setActiveCategory(null);
+    // Real-time categories and items
+    const categoriesUnsub = onSnapshot(collection(db, 'categories'), (catSnap) => {
+      const categoriesData = catSnap.docs.map(doc => ({ id: doc.id, ...doc.data(), items: [] } as Category));
+      
+      const itemsUnsub = onSnapshot(collection(db, 'items'), (itemSnap) => {
+        const itemsData = itemSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as MenuItem));
+        
+        const fullMenu = categoriesData.map(cat => ({
+          ...cat,
+          items: itemsData.filter(item => item.category_id === cat.id)
+        }));
+        
+        setMenu(fullMenu);
         setLoading(false);
-      })
-      .catch(err => {
-        console.error("Failed to fetch menu:", err);
-        setLoading(false); // Stop loading even on error to show empty state or error
-      });
-    fetchOrders();
+      }, (err) => handleFirestoreError(err, OperationType.LIST, 'items'));
 
-    // Socket.io listeners for real-time updates
-    socket.on('order_created', (data) => {
-      if (data.user_email === customerId) {
-        console.log('[SOCKET] Your order was created, fetching...');
-        fetchOrders();
-      }
-    });
+      return () => itemsUnsub();
+    }, (err) => handleFirestoreError(err, OperationType.LIST, 'categories'));
 
-    socket.on('order_updated', () => {
-      console.log('[SOCKET] Order updated, fetching...');
-      fetchOrders();
-    });
-
-    socket.on('menu_updated', () => {
-      console.log('[SOCKET] Menu updated, fetching...');
-      apiFetch('/api/menu')
-        .then(res => res.json())
-        .then(data => setMenu(data));
-    });
+    // Real-time orders for this customer
+    const ordersQuery = query(
+      collection(db, 'orders'), 
+      where('user_email', '==', customerId),
+      orderBy('created_at', 'desc')
+    );
+    const ordersUnsub = onSnapshot(ordersQuery, (snap) => {
+      const ordersData = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
+      setOrders(ordersData);
+    }, (err) => handleFirestoreError(err, OperationType.LIST, 'orders'));
 
     return () => {
-      socket.off('order_created');
-      socket.off('order_updated');
-      socket.off('menu_updated');
+      categoriesUnsub();
+      ordersUnsub();
     };
   }, [customerId]);
 
@@ -150,7 +162,7 @@ export default function CustomerMenu() {
     setShowCart(true);
   };
 
-  const updateCartQuantity = (id: number, type: string, addons: any[], delta: number) => {
+  const updateCartQuantity = (id: string, type: string, addons: any[], delta: number) => {
     setCart(prev => prev.map(i => {
       if (i.id === id && i.selectedType === type && JSON.stringify(i.selectedAddons) === JSON.stringify(addons)) {
         const newQty = Math.max(0, i.quantity + delta);
@@ -169,39 +181,64 @@ export default function CustomerMenu() {
     if (cart.length === 0) return;
     setIsSubmittingOrder(true);
     try {
-      const res = await apiFetch('/api/orders', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_email: customerId,
-          total: cartTotal,
-          payment_method: paymentMethod,
-          items: cart.map(i => ({
-            id: i.id,
-            name: i.name,
-            price: i.selectedPrice,
-            quantity: i.quantity,
-            type: i.selectedType,
-            selectedAddons: i.selectedAddons
-          }))
-        })
+      await addDoc(collection(db, 'orders'), {
+        user_email: customerId,
+        total: cartTotal,
+        payment_method: paymentMethod,
+        status: 'pending',
+        is_paid: false,
+        created_at: serverTimestamp(),
+        items: cart.map(i => ({
+          menu_item_id: i.id,
+          name: i.name,
+          price: i.selectedPrice,
+          quantity: i.quantity,
+          type: i.selectedType,
+          selected_addons: i.selectedAddons
+        }))
       });
-      if (res.ok) {
-        setCart([]);
-        setShowCart(false);
-        setShowPaymentModal(false);
-        fetchOrders();
-      }
+      
+      setCart([]);
+      setShowCart(false);
+      setShowPaymentModal(false);
+      setShowOrderTracker(true);
     } catch (err) {
-      console.error(err);
+      handleFirestoreError(err, OperationType.CREATE, 'orders');
     } finally {
       setIsSubmittingOrder(false);
     }
   };
 
-  const handlePay = async (orderId: number) => {
-    await apiFetch(`/api/orders/${orderId}/pay`, { method: 'PUT' });
-    fetchOrders();
+  const handleLogoClick = () => {
+    setLogoClicks(prev => {
+      const next = prev + 1;
+      if (next >= 3) {
+        setShowAdminModal(true);
+        return 0;
+      }
+      return next;
+    });
+  };
+
+  const handleAdminSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (adminPassword === 'bodega2024') {
+      navigate('/admin');
+      setShowAdminModal(false);
+      setAdminPassword('');
+      setAdminError(false);
+    } else {
+      setAdminError(true);
+      setTimeout(() => setAdminError(false), 2000);
+    }
+  };
+
+  const handlePay = async (orderId: string) => {
+    try {
+      await updateDoc(doc(db, 'orders', orderId), { is_paid: true });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `orders/${orderId}`);
+    }
   };
 
   if (loading) {
@@ -559,17 +596,21 @@ export default function CustomerMenu() {
                             <div>
                               <p className="text-[9px] font-black uppercase tracking-widest text-gray-400">Order #{order.id}</p>
                               <div className="flex items-center gap-2 mt-1">
-                                <p className="text-[10px] font-bold text-gray-500">{new Date(order.created_at).toLocaleTimeString()}</p>
+                                <p className="text-[10px] font-bold text-gray-500">
+                                  {order.created_at?.toDate 
+                                    ? order.created_at.toDate().toLocaleTimeString() 
+                                    : new Date(order.created_at).toLocaleTimeString()}
+                                </p>
                                 {order.payment_method && (
                                   <span className="bg-black text-white text-[7px] font-black px-1.5 py-0.5 rounded-full uppercase tracking-widest border border-white/20">
                                     {order.payment_method}
                                   </span>
                                 )}
-                                <span className={`text-[8px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest ${
+                                <p className={`text-[8px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest ${
                                   order.status === 'completed' ? 'bg-green-100 text-green-600' : 'bg-orange-100 text-orange-600'
                                 }`}>
                                   {order.status === 'completed' ? 'Complete' : 'Preparing'}
-                                </span>
+                                </p>
                               </div>
                             </div>
                             {!order.is_paid ? (
@@ -624,7 +665,8 @@ export default function CustomerMenu() {
                         orders
                           .filter(o => o.is_paid && o.status === 'completed')
                           .reduce((groups, order) => {
-                            const date = new Date(order.created_at).toLocaleDateString(undefined, { 
+                            const dateObj = order.created_at?.toDate ? order.created_at.toDate() : new Date(order.created_at);
+                            const date = dateObj.toLocaleDateString(undefined, { 
                               weekday: 'long', 
                               year: 'numeric', 
                               month: 'long', 
@@ -647,7 +689,9 @@ export default function CustomerMenu() {
                                   <div>
                                     <p className="text-[9px] font-black uppercase tracking-widest text-gray-400">Order #{order.id}</p>
                                     <div className="flex items-center gap-2">
-                                      <p className="text-[10px] font-bold text-gray-500">{new Date(order.created_at).toLocaleTimeString()}</p>
+                                      <p className="text-[10px] font-bold text-gray-500">
+                                        {order.created_at?.toDate ? order.created_at.toDate().toLocaleTimeString() : new Date(order.created_at).toLocaleTimeString()}
+                                      </p>
                                       {order.payment_method && (
                                         <span className="bg-gray-200 text-black text-[7px] font-black px-1.5 py-0.5 rounded-full uppercase tracking-widest border border-black/5">
                                           {order.payment_method}

@@ -1,0 +1,112 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: categories
+    // Fields:
+    //   - name: string (required)
+    //   - image: string (optional)
+    //
+    // Collection: items
+    // Fields:
+    //   - category_id: string (required)
+    //   - name: string (required)
+    //   - price_hot: number (optional)
+    //   - price_cold: number (optional)
+    //   - price_fixed: number (optional)
+    //   - description: string (optional)
+    //   - available: bool (optional)
+    //   - image: string (optional)
+    //   - addons: string (optional)
+    //
+    // Collection: orders
+    // Fields:
+    //   - user_email: string (required)
+    //   - total: number (required)
+    //   - status: string (required)
+    //   - is_paid: bool (required)
+    //   - payment_method: string (optional)
+    //   - created_at: timestamp (required)
+    //   - items: list (required)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (request.auth.token.email == "renzohermano31@gmail.com" && request.auth.token.email_verified == true);
+    }
+
+    function isValidCategory(data) {
+      return data.keys().hasAll(['name']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             (!('image' in data) || (data.image is string && data.image.size() < 2000000)); // Limit image size if base64
+    }
+
+    function isValidItem(data) {
+      return data.keys().hasAll(['category_id', 'name']) &&
+             data.category_id is string &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             (!('price_hot' in data) || data.price_hot is number) &&
+             (!('price_cold' in data) || data.price_cold is number) &&
+             (!('price_fixed' in data) || data.price_fixed is number) &&
+             (!('description' in data) || (data.description is string && data.description.size() < 1000)) &&
+             (!('available' in data) || data.available is bool) &&
+             (!('image' in data) || (data.image is string && data.image.size() < 2000000)) &&
+             (!('addons' in data) || (data.addons is string && data.addons.size() < 5000));
+    }
+
+    function isValidOrder(data) {
+      return data.keys().hasAll(['user_email', 'total', 'status', 'is_paid', 'created_at', 'items']) &&
+             data.user_email is string &&
+             data.total is number &&
+             data.status in ['pending', 'completed', 'cancelled'] &&
+             data.is_paid is bool &&
+             data.created_at is timestamp &&
+             data.items is list;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /categories/{categoryId} {
+      allow read: if true; // Menu is public
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /items/{itemId} {
+      allow read: if true; // Menu is public
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /orders/{orderId} {
+      // Allow admins to see all orders, customers to see their own via filtering
+      // We allow unauthenticated list if filtered by user_email
+      allow list: if isAdmin() || (request.query.filters.user_email != null);
+      
+      // Allow reading individual orders
+      allow get: if isAdmin() || (resource.data.user_email != null);
+      
+      // Allow anyone to create an order (validation handles the rest)
+      allow create: if isValidOrder(request.resource.data);
+      
+      // Only admins can update or delete orders
+      allow update, delete: if isAdmin();
+    }
+    
+    match /{path=**} {
+      allow read, write: if false;
+    }
+  }
+}

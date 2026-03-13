@@ -1,20 +1,18 @@
 export interface MenuItem {
-  id: number;
-  category_id: number;
+  id: string;
+  category_id: string;
   name: string;
   price_hot: number | null;
   price_cold: number | null;
   price_fixed: number | null;
   description: string;
-  available: number;
+  available: boolean;
   image?: string;
   addons?: string; // JSON string of { name: string, price: number, available?: boolean }[]
 }
 
 export interface OrderItem {
-  id: number;
-  order_id: number;
-  menu_item_id: number;
+  menu_item_id: string;
   name: string;
   price: number;
   quantity: number;
@@ -23,18 +21,18 @@ export interface OrderItem {
 }
 
 export interface Order {
-  id: number;
+  id: string;
   user_email: string;
   total: number;
-  status: 'pending' | 'completed';
-  is_paid: number;
+  status: 'pending' | 'completed' | 'cancelled';
+  is_paid: boolean;
   payment_method?: string;
-  created_at: string;
+  created_at: any; // Firestore Timestamp
   items: OrderItem[];
 }
 
 export interface Category {
-  id: number;
+  id: string;
   name: string;
   image?: string;
   items: MenuItem[];

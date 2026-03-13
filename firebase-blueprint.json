@@ -1,0 +1,73 @@
+{
+  "entities": {
+    "Category": {
+      "title": "Category",
+      "description": "A menu category (e.g., Espresso, Food)",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Category name" },
+        "image": { "type": "string", "description": "Category image URL or base64" }
+      },
+      "required": ["name"]
+    },
+    "MenuItem": {
+      "title": "MenuItem",
+      "description": "An individual menu item",
+      "type": "object",
+      "properties": {
+        "category_id": { "type": "string", "description": "ID of the parent category" },
+        "name": { "type": "string", "description": "Item name" },
+        "price_hot": { "type": "number", "description": "Price for hot version" },
+        "price_cold": { "type": "number", "description": "Price for cold version" },
+        "price_fixed": { "type": "number", "description": "Fixed price" },
+        "description": { "type": "string", "description": "Item description" },
+        "available": { "type": "boolean", "description": "Availability status" },
+        "image": { "type": "string", "description": "Item image URL or base64" },
+        "addons": { "type": "string", "description": "JSON string of available addons" }
+      },
+      "required": ["category_id", "name"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "A customer order",
+      "type": "object",
+      "properties": {
+        "user_email": { "type": "string", "description": "Customer email" },
+        "total": { "type": "number", "description": "Total order amount" },
+        "status": { "type": "string", "description": "Order status (pending, completed)" },
+        "is_paid": { "type": "boolean", "description": "Payment status" },
+        "payment_method": { "type": "string", "description": "Payment method used" },
+        "created_at": { "type": "string", "format": "date-time", "description": "Order creation timestamp" },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "menu_item_id": { "type": "string" },
+              "name": { "type": "string" },
+              "price": { "type": "number" },
+              "quantity": { "type": "number" },
+              "type": { "type": "string" },
+              "selected_addons": { "type": "string" }
+            }
+          }
+        }
+      },
+      "required": ["user_email", "total", "items"]
+    }
+  },
+  "firestore": {
+    "/categories": {
+      "schema": "Category",
+      "description": "Collection of menu categories"
+    },
+    "/items": {
+      "schema": "MenuItem",
+      "description": "Collection of menu items"
+    },
+    "/orders": {
+      "schema": "Order",
+      "description": "Collection of customer orders"
+    }
+  }
+}

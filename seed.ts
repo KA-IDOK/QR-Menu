@@ -1,4 +1,9 @@
-const menuData = {
+import fs from 'fs';
+import path from 'path';
+
+const menuDataPath = path.resolve(process.cwd(), 'menu-data.json');
+
+let menuData = {
   categories: [
     {
       name: "Specialty Espresso",
@@ -99,6 +104,19 @@ const menuData = {
   ]
 };
 
+// Try to load from menu-data.json if it exists
+if (fs.existsSync(menuDataPath)) {
+  try {
+    const fileData = JSON.parse(fs.readFileSync(menuDataPath, 'utf-8'));
+    if (fileData.categories) {
+      menuData = fileData;
+      console.log('Using data from menu-data.json for seeding');
+    }
+  } catch (e) {
+    console.error('Error reading menu-data.json, falling back to defaults');
+  }
+}
+
 async function seed() {
   try {
     const response = await fetch('http://localhost:3000/api/seed', {
@@ -114,3 +132,4 @@ async function seed() {
 }
 
 seed();
+

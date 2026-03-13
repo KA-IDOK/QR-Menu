@@ -6,7 +6,6 @@ import fs from "fs";
 import { fileURLToPath } from "url";
 import { createServer } from "http";
 import { Server } from "socket.io";
-import cors from "cors";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -19,38 +18,52 @@ const originalWarn = console.warn;
 const logToFile = (level: string, ...args: any[]) => {
   const message = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg)).join(' ');
   const logLine = `[${level}] ${new Date().toISOString()} | ${message}\n`;
-  originalLog.apply(console, args);
   try {
     fs.appendFileSync(path.resolve(process.cwd(), "server.log"), logLine);
   } catch (e) {}
 };
 
-console.log = (...args) => logToFile('LOG', ...args);
-console.error = (...args) => logToFile('ERROR', ...args);
-console.warn = (...args) => logToFile('WARN', ...args);
+console.log = (...args) => { originalLog(...args); logToFile('LOG', ...args); };
+console.error = (...args) => { originalError(...args); logToFile('ERROR', ...args); };
+console.warn = (...args) => { originalWarn(...args); logToFile('WARN', ...args); };
 
 console.log("[SERVER] Module loading...");
 console.log("[SERVER] __dirname:", __dirname);
 console.log("[SERVER] process.cwd():", process.cwd());
 
 const dbPath = path.resolve(process.cwd(), "menu.db");
+const menuDataPath = path.resolve(process.cwd(), "menu-data.json");
 console.log(`Initializing database at: ${dbPath}`);
 let db: any;
 try {
   db = new Database(dbPath);
   console.log("Database initialized successfully");
 } catch (err) {
-  console.error("FAILED TO OPEN DATABASE FILE:", err);
+  console.error("FAILED TO INITIALIZE DATABASE:", err);
+  // Fallback to in-memory if file fails (though this shouldn't happen in this env)
   db = new Database(":memory:");
-  console.log("Using in-memory database fallback");
 }
 
-// Initialize database schema
+// Helper to sync database to JSON file for "code permanence"
+const syncMenuToFile = () => {
+  try {
+    const categories = db.prepare("SELECT * FROM categories").all();
+    const menu = categories.map((cat: any) => {
+      const items = db.prepare("SELECT * FROM items WHERE category_id = ?").all(cat.id);
+      return { ...cat, items };
+    });
+    fs.writeFileSync(menuDataPath, JSON.stringify({ categories: menu }, null, 2));
+    console.log("[SERVER] Menu synced to menu-data.json");
+  } catch (err) {
+    console.error("[SERVER] Error syncing menu to file:", err);
+  }
+};
+
+// Initialize database
 db.exec(`
   CREATE TABLE IF NOT EXISTS categories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE,
-    image TEXT
+    name TEXT NOT NULL UNIQUE
   );
 
   CREATE TABLE IF NOT EXISTS items (
@@ -89,19 +102,6 @@ db.exec(`
     FOREIGN KEY (order_id) REFERENCES orders(id)
   );
 `);
-
-// Log database state
-try {
-  const count = db.prepare("SELECT COUNT(*) as count FROM categories").get() as { count: number };
-  console.log(`[DB] Categories count: ${count.count}`);
-} catch (err) {
-  console.error("[DB] Error checking categories count:", err);
-}
-
-// Migration: Add image column to categories if it doesn't exist
-try {
-  db.exec("ALTER TABLE categories ADD COLUMN image TEXT");
-} catch (e) {}
 
 // Migration: Add image column if it doesn't exist (for existing databases)
 try {
@@ -159,115 +159,129 @@ try {
 // Seed initial data if empty
 const categoryCount = db.prepare("SELECT COUNT(*) as count FROM categories").get() as { count: number };
 if (categoryCount.count === 0) {
-  console.log("[DB] Seeding initial data...");
-  const beverageAddons = JSON.stringify([
-    { name: "Hazelnut", price: 30, available: true },
-    { name: "Vanilla", price: 30, available: true },
-    { name: "White chocolate", price: 30, available: true },
-    { name: "Espresso Shot", price: 80, available: true }
-  ]);
-  const foodAddons = JSON.stringify([
-    { name: "Rice", price: 30, available: true }
-  ]);
-
-  const seedData = [
-    {
-      name: "SPECIALTY ESPRESSO BEVERAGES",
-      items: [
-        { name: "Brewed Coffee", price_hot: 100, price_cold: 120, image: "https://images.unsplash.com/photo-1541167760496-1628856ab772?w=800&auto=format&fit=crop" },
-        { name: "White Chocolate Mocha", price_cold: 180, image: "https://images.unsplash.com/photo-1572442388796-11668a67e53d?w=800&auto=format&fit=crop" },
-        { name: "Caramel Macchiato", price_cold: 180, image: "https://images.unsplash.com/photo-1485808191679-5f86510681a2?w=800&auto=format&fit=crop" },
-        { name: "Classic Spanish Latte", price_hot: 175, price_cold: 200, image: "https://images.unsplash.com/photo-1551030173-122adba81f3a?w=800&auto=format&fit=crop" },
-        { name: "Seasalt Caramel Latte", price_hot: 175, price_cold: 200, image: "https://images.unsplash.com/photo-1594133282413-62006396771f?w=800&auto=format&fit=crop" },
-        { name: "Hazelnut Latte", price_hot: 175, price_cold: 200, image: "https://images.unsplash.com/photo-1461023058943-07fcbe16d735?w=800&auto=format&fit=crop" }
-      ]
-    },
-    {
-      name: "BODEGA X LINEAR COFFEE ROASTERS",
-      items: [
-        { name: "Filtered Coffee", price_fixed: 100, image: "https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?w=800&auto=format&fit=crop" },
-        { name: "Espresso / Black", price_fixed: 100, image: "https://images.unsplash.com/photo-1510591509098-f4fdc6d0ff04?w=800&auto=format&fit=crop" },
-        { name: "White", price_fixed: 100, image: "https://images.unsplash.com/photo-1517701604599-bb29b565090c?w=800&auto=format&fit=crop" },
-        { name: "White Brew", price_fixed: 120, image: "https://images.unsplash.com/photo-1461023058943-07fcbe16d735?w=800&auto=format&fit=crop" },
-        { name: "Cold Brew", price_fixed: 120, image: "https://images.unsplash.com/photo-1517701553060-0a3405d58280?w=800&auto=format&fit=crop" }
-      ]
-    },
-    {
-      name: "NON-ESPRESSO BEVERAGES",
-      items: [
-        { name: "Matcha Latte", price_fixed: 180, image: "https://images.unsplash.com/photo-1515823662273-ad9525e58846?w=800&auto=format&fit=crop" },
-        { name: "Ube Latte", price_fixed: 180, image: "https://images.unsplash.com/photo-1578314675249-a6910f80cc4e?w=800&auto=format&fit=crop" },
-        { name: "Strawberry Matcha Latte", price_fixed: 200, image: "https://images.unsplash.com/photo-1594631252845-29fc4cc8cde9?w=800&auto=format&fit=crop" },
-        { name: "Ube Matcha Latte", price_fixed: 200, image: "https://images.unsplash.com/photo-1578314675249-a6910f80cc4e?w=800&auto=format&fit=crop" }
-      ]
-    },
-    {
-      name: "HOT TEA",
-      items: [
-        { name: "Pure Chamomile", price_fixed: 120, image: "https://images.unsplash.com/photo-1594631252845-29fc4cc8cde9?w=800&auto=format&fit=crop" },
-        { name: "English Breakfast", price_fixed: 120, image: "https://images.unsplash.com/photo-1594631252845-29fc4cc8cde9?w=800&auto=format&fit=crop" },
-        { name: "Green Tea", price_fixed: 120, image: "https://images.unsplash.com/photo-1594631252845-29fc4cc8cde9?w=800&auto=format&fit=crop" }
-      ]
-    },
-    {
-      name: "COMFORT FOOD",
-      items: [
-        { name: "Siomai Rice Bowl", price_fixed: 149, image: "https://images.unsplash.com/photo-1563379091339-03b21bc4a4f8?w=800&auto=format&fit=crop" },
-        { name: "Longganisa with Egg", price_fixed: 179, image: "https://images.unsplash.com/photo-1585032226651-759b368d7246?w=800&auto=format&fit=crop" },
-        { name: "Bistek Tagalog", price_fixed: 199, image: "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=800&auto=format&fit=crop" },
-        { name: "Burger Steak", price_fixed: 249, image: "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=800&auto=format&fit=crop" },
-        { name: "Chicken Torikatsu", price_fixed: 249, image: "https://images.unsplash.com/photo-1562607378-27b956467629?w=800&auto=format&fit=crop" },
-        { name: "Spam with Egg", price_fixed: 249, image: "https://images.unsplash.com/photo-1551782450-a2132b4ba21d?w=800&auto=format&fit=crop" }
-      ]
-    },
-    {
-      name: "SWEET TREATS",
-      items: [
-        { name: "Chocolate Chip Cookie", price_fixed: 90, image: "https://images.unsplash.com/photo-1499636136210-6f4ee915583e?w=800&auto=format&fit=crop" },
-        { name: "Red Velvet Cookie", price_fixed: 90, image: "https://images.unsplash.com/photo-1616733148914-29d97a5da3c1?w=800&auto=format&fit=crop" },
-        { name: "Biscoff Cookie", price_fixed: 90, image: "https://images.unsplash.com/photo-1499636136210-6f4ee915583e?w=800&auto=format&fit=crop" },
-        { name: "Mango Graham", price_fixed: 170, image: "https://images.unsplash.com/photo-1551024601-bec78aea704b?w=800&auto=format&fit=crop" },
-        { name: "Tiramisu", price_fixed: 190, image: "https://images.unsplash.com/photo-1571877227200-a0d98ea607e9?w=800&auto=format&fit=crop" },
-        { name: "Basque Burnt Cheesecake", price_fixed: 190, image: "https://images.unsplash.com/photo-1533134242443-d4fd215305ad?w=800&auto=format&fit=crop" }
-      ]
-    },
-    {
-      name: "JUICES & FRUIT TEAS",
-      items: [
-        { name: "Green Apple Fruit Tea", price_fixed: 150, image: "https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=800&auto=format&fit=crop" },
-        { name: "Melon Fruit Tea", price_fixed: 150, image: "https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=800&auto=format&fit=crop" },
-        { name: "Hibiscus Lemonade", price_fixed: 150, image: "https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=800&auto=format&fit=crop" },
-        { name: "Green Apple Yakult", price_fixed: 190, image: "https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=800&auto=format&fit=crop" },
-        { name: "Melon Yakult", price_fixed: 190, image: "https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=800&auto=format&fit=crop" }
-      ]
-    },
-    {
-      name: "SMOOTHIES & FRAPPES",
-      items: [
-        { name: "Blueberry Smoothie", price_fixed: 160, image: "https://images.unsplash.com/photo-1553530209-92264097c64b?w=800&auto=format&fit=crop" },
-        { name: "Strawberry Smoothie", price_fixed: 160, image: "https://images.unsplash.com/photo-1553530209-92264097c64b?w=800&auto=format&fit=crop" },
-        { name: "Java Chip Frappe", price_fixed: 200, image: "https://images.unsplash.com/photo-1572490122747-3968b75cc699?w=800&auto=format&fit=crop" }
-      ]
-    },
-    {
-      name: "SODA POP",
-      items: [
-        { name: "Strawberry Soda", price_fixed: 160, addons: beverageAddons, image: "https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=800&auto=format&fit=crop" },
-        { name: "Blueberry Soda", price_fixed: 160, addons: beverageAddons, image: "https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=800&auto=format&fit=crop" },
-        { name: "Butterfly Pea Peach Soda", price_fixed: 200, addons: beverageAddons, image: "https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=800&auto=format&fit=crop" }
-      ]
-    },
-    {
-      name: "QUICK BITES",
-      items: [
-        { name: "Siopao", price_fixed: 59, addons: foodAddons, image: "https://images.unsplash.com/photo-1563379091339-03b21bc4a4f8?w=800&auto=format&fit=crop" },
-        { name: "Fries (BBQ / Sour Cream)", price_fixed: 159, addons: foodAddons, image: "https://images.unsplash.com/photo-1573016608294-d447906a3a29?w=800&auto=format&fit=crop" },
-        { name: "Chicken Nuggets", price_fixed: 179, addons: foodAddons, image: "https://images.unsplash.com/photo-1562607378-27b956467629?w=800&auto=format&fit=crop" },
-        { name: "Korean Ramen with Egg", price_fixed: 199, addons: foodAddons, image: "https://images.unsplash.com/photo-1569718212165-3a8278d5f624?w=800&auto=format&fit=crop" },
-        { name: "Mama's Lasagna with Bread", price_fixed: 199, addons: foodAddons, image: "https://images.unsplash.com/photo-1551183053-bf91a1d81141?w=800&auto=format&fit=crop" }
-      ]
+  let seedData: any;
+  
+  if (fs.existsSync(menuDataPath)) {
+    console.log("[SERVER] Loading seed data from menu-data.json");
+    try {
+      const fileData = JSON.parse(fs.readFileSync(menuDataPath, 'utf-8'));
+      seedData = fileData.categories;
+    } catch (e) {
+      console.error("[SERVER] Error reading menu-data.json:", e);
     }
-  ];
+  }
+
+  if (!seedData) {
+    console.log("[SERVER] Using hardcoded seed data");
+    const beverageAddons = JSON.stringify([
+      { name: "Hazelnut", price: 30, available: true },
+      { name: "Vanilla", price: 30, available: true },
+      { name: "White chocolate", price: 30, available: true },
+      { name: "Espresso Shot", price: 80, available: true }
+    ]);
+    const foodAddons = JSON.stringify([
+      { name: "Rice", price: 30, available: true }
+    ]);
+
+    seedData = [
+      {
+        name: "SPECIALTY ESPRESSO BEVERAGES",
+        items: [
+          { name: "Brewed Coffee", price_hot: 100, price_cold: 120, image: "https://images.unsplash.com/photo-1541167760496-1628856ab772?w=800&auto=format&fit=crop" },
+          { name: "White Chocolate Mocha", price_cold: 180, image: "https://images.unsplash.com/photo-1572442388796-11668a67e53d?w=800&auto=format&fit=crop" },
+          { name: "Caramel Macchiato", price_cold: 180, image: "https://images.unsplash.com/photo-1485808191679-5f86510681a2?w=800&auto=format&fit=crop" },
+          { name: "Classic Spanish Latte", price_hot: 175, price_cold: 200, image: "https://images.unsplash.com/photo-1551030173-122adba81f3a?w=800&auto=format&fit=crop" },
+          { name: "Seasalt Caramel Latte", price_hot: 175, price_cold: 200, image: "https://images.unsplash.com/photo-1594133282413-62006396771f?w=800&auto=format&fit=crop" },
+          { name: "Hazelnut Latte", price_hot: 175, price_cold: 200, image: "https://images.unsplash.com/photo-1461023058943-07fcbe16d735?w=800&auto=format&fit=crop" }
+        ]
+      },
+      {
+        name: "BODEGA X LINEAR COFFEE ROASTERS",
+        items: [
+          { name: "Filtered Coffee", price_fixed: 100, image: "https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?w=800&auto=format&fit=crop" },
+          { name: "Espresso / Black", price_fixed: 100, image: "https://images.unsplash.com/photo-1510591509098-f4fdc6d0ff04?w=800&auto=format&fit=crop" },
+          { name: "White", price_fixed: 100, image: "https://images.unsplash.com/photo-1517701604599-bb29b565090c?w=800&auto=format&fit=crop" },
+          { name: "White Brew", price_fixed: 120, image: "https://images.unsplash.com/photo-1461023058943-07fcbe16d735?w=800&auto=format&fit=crop" },
+          { name: "Cold Brew", price_fixed: 120, image: "https://images.unsplash.com/photo-1517701553060-0a3405d58280?w=800&auto=format&fit=crop" }
+        ]
+      },
+      {
+        name: "NON-ESPRESSO BEVERAGES",
+        items: [
+          { name: "Matcha Latte", price_fixed: 180, image: "https://images.unsplash.com/photo-1515823662273-ad9525e58846?w=800&auto=format&fit=crop" },
+          { name: "Ube Latte", price_fixed: 180, image: "https://images.unsplash.com/photo-1578314675249-a6910f80cc4e?w=800&auto=format&fit=crop" },
+          { name: "Strawberry Matcha Latte", price_fixed: 200, image: "https://images.unsplash.com/photo-1594631252845-29fc4cc8cde9?w=800&auto=format&fit=crop" },
+          { name: "Ube Matcha Latte", price_fixed: 200, image: "https://images.unsplash.com/photo-1578314675249-a6910f80cc4e?w=800&auto=format&fit=crop" }
+        ]
+      },
+      {
+        name: "HOT TEA",
+        items: [
+          { name: "Pure Chamomile", price_fixed: 120, image: "https://images.unsplash.com/photo-1594631252845-29fc4cc8cde9?w=800&auto=format&fit=crop" },
+          { name: "English Breakfast", price_fixed: 120, image: "https://images.unsplash.com/photo-1594631252845-29fc4cc8cde9?w=800&auto=format&fit=crop" },
+          { name: "Green Tea", price_fixed: 120, image: "https://images.unsplash.com/photo-1594631252845-29fc4cc8cde9?w=800&auto=format&fit=crop" }
+        ]
+      },
+      {
+        name: "COMFORT FOOD",
+        items: [
+          { name: "Siomai Rice Bowl", price_fixed: 149, image: "https://images.unsplash.com/photo-1563379091339-03b21bc4a4f8?w=800&auto=format&fit=crop" },
+          { name: "Longganisa with Egg", price_fixed: 179, image: "https://images.unsplash.com/photo-1585032226651-759b368d7246?w=800&auto=format&fit=crop" },
+          { name: "Bistek Tagalog", price_fixed: 199, image: "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=800&auto=format&fit=crop" },
+          { name: "Burger Steak", price_fixed: 249, image: "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=800&auto=format&fit=crop" },
+          { name: "Chicken Torikatsu", price_fixed: 249, image: "https://images.unsplash.com/photo-1562607378-27b956467629?w=800&auto=format&fit=crop" },
+          { name: "Spam with Egg", price_fixed: 249, image: "https://images.unsplash.com/photo-1551782450-a2132b4ba21d?w=800&auto=format&fit=crop" }
+        ]
+      },
+      {
+        name: "SWEET TREATS",
+        items: [
+          { name: "Chocolate Chip Cookie", price_fixed: 90, image: "https://images.unsplash.com/photo-1499636136210-6f4ee915583e?w=800&auto=format&fit=crop" },
+          { name: "Red Velvet Cookie", price_fixed: 90, image: "https://images.unsplash.com/photo-1616733148914-29d97a5da3c1?w=800&auto=format&fit=crop" },
+          { name: "Biscoff Cookie", price_fixed: 90, image: "https://images.unsplash.com/photo-1499636136210-6f4ee915583e?w=800&auto=format&fit=crop" },
+          { name: "Mango Graham", price_fixed: 170, image: "https://images.unsplash.com/photo-1551024601-bec78aea704b?w=800&auto=format&fit=crop" },
+          { name: "Tiramisu", price_fixed: 190, image: "https://images.unsplash.com/photo-1571877227200-a0d98ea607e9?w=800&auto=format&fit=crop" },
+          { name: "Basque Burnt Cheesecake", price_fixed: 190, image: "https://images.unsplash.com/photo-1533134242443-d4fd215305ad?w=800&auto=format&fit=crop" }
+        ]
+      },
+      {
+        name: "JUICES & FRUIT TEAS",
+        items: [
+          { name: "Green Apple Fruit Tea", price_fixed: 150, image: "https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=800&auto=format&fit=crop" },
+          { name: "Melon Fruit Tea", price_fixed: 150, image: "https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=800&auto=format&fit=crop" },
+          { name: "Hibiscus Lemonade", price_fixed: 150, image: "https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=800&auto=format&fit=crop" },
+          { name: "Green Apple Yakult", price_fixed: 190, image: "https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=800&auto=format&fit=crop" },
+          { name: "Melon Yakult", price_fixed: 190, image: "https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=800&auto=format&fit=crop" }
+        ]
+      },
+      {
+        name: "SMOOTHIES & FRAPPES",
+        items: [
+          { name: "Blueberry Smoothie", price_fixed: 160, image: "https://images.unsplash.com/photo-1553530209-92264097c64b?w=800&auto=format&fit=crop" },
+          { name: "Strawberry Smoothie", price_fixed: 160, image: "https://images.unsplash.com/photo-1553530209-92264097c64b?w=800&auto=format&fit=crop" },
+          { name: "Java Chip Frappe", price_fixed: 200, image: "https://images.unsplash.com/photo-1572490122747-3968b75cc699?w=800&auto=format&fit=crop" }
+        ]
+      },
+      {
+        name: "SODA POP",
+        items: [
+          { name: "Strawberry Soda", price_fixed: 160, image: "https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=800&auto=format&fit=crop" },
+          { name: "Blueberry Soda", price_fixed: 160, image: "https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=800&auto=format&fit=crop" },
+          { name: "Butterfly Pea Peach Soda", price_fixed: 200, image: "https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=800&auto=format&fit=crop" }
+        ]
+      },
+      {
+        name: "QUICK BITES",
+        items: [
+          { name: "Siopao", price_fixed: 59, image: "https://images.unsplash.com/photo-1563379091339-03b21bc4a4f8?w=800&auto=format&fit=crop" },
+          { name: "Fries (BBQ / Sour Cream)", price_fixed: 159, image: "https://images.unsplash.com/photo-1573016608294-d447906a3a29?w=800&auto=format&fit=crop" },
+          { name: "Chicken Nuggets", price_fixed: 179, image: "https://images.unsplash.com/photo-1562607378-27b956467629?w=800&auto=format&fit=crop" },
+          { name: "Korean Ramen with Egg", price_fixed: 199, image: "https://images.unsplash.com/photo-1569718212165-3a8278d5f624?w=800&auto=format&fit=crop" },
+          { name: "Mama's Lasagna with Bread", price_fixed: 199, image: "https://images.unsplash.com/photo-1551183053-bf91a1d81141?w=800&auto=format&fit=crop" }
+        ]
+      }
+    ];
+  }
 
   const insertCategory = db.prepare("INSERT INTO categories (name) VALUES (?)");
   const insertItem = db.prepare(`
@@ -276,12 +290,22 @@ if (categoryCount.count === 0) {
   `);
 
   db.transaction(() => {
+    const beverageAddons = JSON.stringify([
+      { name: "Hazelnut", price: 30, available: true },
+      { name: "Vanilla", price: 30, available: true },
+      { name: "White chocolate", price: 30, available: true },
+      { name: "Espresso Shot", price: 80, available: true }
+    ]);
+    const foodAddons = JSON.stringify([
+      { name: "Rice", price: 30, available: true }
+    ]);
+
     for (const cat of seedData) {
       const catInfo = insertCategory.run(cat.name);
       for (const item of cat.items) {
         const i = item as any;
         // Use foodAddons for QUICK BITES and COMFORT FOOD, beverageAddons for others, null for SWEET TREATS
-        let itemAddons = (cat.name === "QUICK BITES" || cat.name === "COMFORT FOOD") ? foodAddons : beverageAddons;
+        let itemAddons = i.addons || ((cat.name === "QUICK BITES" || cat.name === "COMFORT FOOD") ? foodAddons : beverageAddons);
         if (cat.name === "SWEET TREATS") {
           itemAddons = null;
         }
@@ -298,38 +322,14 @@ if (categoryCount.count === 0) {
       }
     }
   })();
-  console.log("[DB] Seeding completed.");
+  
+  // Sync to file after seeding
+  syncMenuToFile();
 }
 
 async function startServer() {
   const app = express();
   const httpServer = createServer(app);
-  
-  httpServer.on('request', (req, res) => {
-    const logLine = `[HTTP REQ] ${new Date().toISOString()} | ${req.method} ${req.url}\n`;
-    try {
-      fs.appendFileSync(path.resolve(process.cwd(), "debug.log"), logLine);
-    } catch (e) {}
-  });
-
-  console.log("[SERVER] Registering global logger...");
-  
-  // Global Request Logger - MUST BE FIRST
-  app.use((req, res, next) => {
-    const logLine = `[GLOBAL LOG] ${new Date().toISOString()} | ${req.method} ${req.url} | Origin: ${req.headers.origin}\n`;
-    console.log(logLine.trim());
-    try {
-      fs.appendFileSync(path.resolve(process.cwd(), "server.log"), logLine);
-    } catch (e) {}
-    next();
-  });
-
-  // CORS - MUST BE EARLY
-  app.use(cors());
-  
-  // Body Parsing Middleware - EARLY for all API routes
-  app.use(express.json({ limit: '10mb' }));
-
   const io = new Server(httpServer, {
     cors: {
       origin: "*",
@@ -341,48 +341,14 @@ async function startServer() {
   const isProd = process.env.NODE_ENV === 'production';
 
   // Helper to notify all clients of updates
-  let menuUpdateTimeout: NodeJS.Timeout | null = null;
   const notifyUpdate = (type: string, data?: any) => {
     console.log(`[SOCKET] Notifying update: ${type}`);
-    
-    if (type === "menu_updated") {
-      if (menuUpdateTimeout) clearTimeout(menuUpdateTimeout);
-      menuUpdateTimeout = setTimeout(() => {
-        io.emit(type, data);
-        menuUpdateTimeout = null;
-      }, 500); // Debounce menu updates
-    } else {
-      io.emit(type, data);
-    }
+    io.emit(type, data);
   };
 
   // Socket.io connection
   io.on("connection", (socket) => {
-    console.log(`[SOCKET] Client connected: ${socket.id} | Total clients: ${io.engine.clientsCount}`);
-    
-    const testInterval = setInterval(() => {
-      socket.emit('test_event', { time: Date.now() });
-    }, 2000);
-
-    socket.on("disconnect", (reason) => {
-      clearInterval(testInterval);
-      console.log(`[SOCKET] Client disconnected: ${socket.id} | Reason: ${reason} | Total clients: ${io.engine.clientsCount}`);
-    });
-    
-    // Send a ping to the client
-    socket.emit('server_ping', { time: Date.now() });
-    
-    socket.onAny((event, ...args) => {
-      console.log(`[SOCKET EVENT] ${socket.id} | ${event}:`, args);
-    });
-    
-    socket.on('client_log', (data) => {
-      console.log(`[CLIENT LOG] ${socket.id}:`, data);
-    });
-    
-    socket.on('client_error', (data) => {
-      console.error(`[CLIENT ERROR] ${socket.id}:`, data);
-    });
+    console.log(`[SOCKET] Client connected: ${socket.id}`);
   });
 
   console.log(`--- Server Starting ---`);
@@ -391,21 +357,30 @@ async function startServer() {
   console.log(`Port: ${PORT}`);
   console.log(`Working Directory: ${process.cwd()}`);
   console.log(`-----------------------`);
-  
+
+  // Global Request Logger - MUST BE FIRST
+  app.use((req, res, next) => {
+    const logLine = `[GLOBAL LOG] ${new Date().toISOString()} | ${req.method} ${req.url} | Origin: ${req.headers.origin}\n`;
+    console.log(logLine.trim());
+    try {
+      fs.appendFileSync(path.resolve(process.cwd(), "server.log"), logLine);
+    } catch (e) {}
+    next();
+  });
+
   // API Cache Control and Content Type
   app.use("/api", (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.type('json'); // Ensure all /api responses are JSON
     next();
   });
 
   // API Routes - GET routes first (no body parsing needed)
   app.get("/api/health", (req, res) => {
-    console.log(`[API] Health check HIT: ${req.method} ${req.url}`);
-    res.json({ status: "ok", version: "1.0.2", time: new Date().toISOString() });
-  });
-
-  app.post("/api/log", (req, res) => {
-    console.log(`[CLIENT FETCH LOG]:`, req.body);
-    res.json({ status: "ok" });
+    console.log(`[API] Health check: ${req.method} ${req.url}`);
+    res.json({ status: "ok", time: new Date().toISOString() });
   });
 
   const getMenu = (req: any, res: any) => {
@@ -464,31 +439,20 @@ async function startServer() {
     res.json(ordersWithItems);
   });
 
+  // Body Parsing Middleware - ONLY AFTER GET ROUTES
+  app.use(express.json({ limit: '10mb' }));
+
   app.post("/api/categories", (req, res) => {
-    const { name, image } = req.body;
+    const { name } = req.body;
     console.log(`[API] Create category: ${name}`);
     try {
-      const info = db.prepare("INSERT INTO categories (name, image) VALUES (?, ?)").run(name, image);
+      const info = db.prepare("INSERT INTO categories (name) VALUES (?)").run(name);
       notifyUpdate("menu_updated");
-      res.json({ id: info.lastInsertRowid, name, image });
+      syncMenuToFile();
+      res.json({ id: info.lastInsertRowid, name });
     } catch (e) {
       console.error("[API] Error creating category:", e);
       res.status(400).json({ error: "Category already exists or invalid data" });
-    }
-  });
-
-  app.put("/api/categories/:id", (req, res) => {
-    const { id } = req.params;
-    const { name, image } = req.body;
-    console.log(`[API] Updating category ${id}: ${name} (image length: ${image?.length || 0})`);
-    try {
-      const result = db.prepare("UPDATE categories SET name = ?, image = ? WHERE id = ?").run(name, image, id);
-      console.log(`[API] Category update result:`, result);
-      notifyUpdate("menu_updated");
-      res.json({ success: true });
-    } catch (e) {
-      console.error("[API] Error updating category:", e);
-      res.status(500).json({ error: "Error updating category", details: e instanceof Error ? e.message : String(e) });
     }
   });
 
@@ -520,31 +484,27 @@ async function startServer() {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(category_id, name, price_hot, price_cold, price_fixed, description, image, addons);
     notifyUpdate("menu_updated");
+    syncMenuToFile();
     res.json({ id: info.lastInsertRowid, ...req.body, addons });
   });
 
   app.put("/api/items/:id", (req, res) => {
     const { id } = req.params;
     const { name, price_hot, price_cold, price_fixed, description, available, image, addons } = req.body;
-    console.log(`[API] Updating item ${id}: ${name} (image length: ${image?.length || 0})`);
-    try {
-      const result = db.prepare(`
-        UPDATE items 
-        SET name = ?, price_hot = ?, price_cold = ?, price_fixed = ?, description = ?, available = ?, image = ?, addons = ?
-        WHERE id = ?
-      `).run(name, price_hot, price_cold, price_fixed, description, available, image, addons, id);
-      console.log(`[API] Item update result:`, result);
-      notifyUpdate("menu_updated");
-      res.json({ success: true });
-    } catch (e) {
-      console.error("[API] Error updating item:", e);
-      res.status(500).json({ error: "Error updating item", details: e instanceof Error ? e.message : String(e) });
-    }
+    db.prepare(`
+      UPDATE items 
+      SET name = ?, price_hot = ?, price_cold = ?, price_fixed = ?, description = ?, available = ?, image = ?, addons = ?
+      WHERE id = ?
+    `).run(name, price_hot, price_cold, price_fixed, description, available, image, addons, id);
+    notifyUpdate("menu_updated");
+    syncMenuToFile();
+    res.json({ success: true });
   });
 
   app.delete("/api/items/:id", (req, res) => {
     db.prepare("DELETE FROM items WHERE id = ?").run(req.params.id);
     notifyUpdate("menu_updated");
+    syncMenuToFile();
     res.json({ success: true });
   });
 
@@ -633,6 +593,7 @@ async function startServer() {
 
     transaction(categories);
     notifyUpdate("menu_updated");
+    syncMenuToFile();
     res.json({ success: true });
   });
 
