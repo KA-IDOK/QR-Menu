@@ -12,14 +12,8 @@ const __dirname = path.dirname(__filename);
 const menuDataPath = path.resolve(process.cwd(), "menu-data.json");
 
 // Initialize Supabase
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_KEY;
-
-if (!supabaseUrl || !supabaseKey) {
-  console.error("[SERVER] FATAL ERROR: SUPABASE_URL and SUPABASE_KEY must be set.");
-  process.exit(1);
-}
-
+const supabaseUrl = process.env.SUPABASE_URL || "";
+const supabaseKey = process.env.SUPABASE_KEY || "";
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 console.log("[SERVER] Supabase client initialized.");
@@ -369,16 +363,13 @@ async function startServer() {
 
   app.post("/api/seed", async (req, res) => {
     const { categories } = req.body;
-    console.log("[API] /api/seed received request with", categories?.length || 0, "categories");
     
     try {
       // Delete existing data
-      console.log("[API] /api/seed: Deleting existing data...");
       await supabase.from('order_items').delete().neq('id', 0);
       await supabase.from('orders').delete().neq('id', 0);
       await supabase.from('items').delete().neq('id', 0);
       await supabase.from('categories').delete().neq('id', 0);
-      console.log("[API] /api/seed: Existing data deleted.");
       
       const beverageAddons = [
         { name: "Hazelnut", price: 30, available: true },
@@ -389,33 +380,23 @@ async function startServer() {
       const foodAddons = [{ name: "Rice", price: 30, available: true }];
 
       for (const cat of categories) {
-        console.log(`[API] /api/seed: Inserting category ${cat.name}...`);
         const { data: catData, error: catError } = await supabase
           .from('categories')
           .insert([{ name: cat.name, image: cat.image || null }])
           .select()
           .single();
-        if (catError) {
-          console.error(`[API] /api/seed: Error inserting category ${cat.name}:`, catError);
-          throw catError;
-        }
+        if (catError) throw catError;
         
         const catId = catData.id;
-        console.log(`[API] /api/seed: Category ${cat.name} inserted with ID ${catId}. Inserting ${cat.items?.length || 0} items...`);
         
         const itemsToInsert = cat.items.map((item: any) => {
           const hot = item.prices?.hot || (typeof item.price === 'object' ? item.price.hot : null);
           const cold = item.prices?.cold || (typeof item.price === 'object' ? item.price.cold : null);
           const fixed = typeof item.price === 'number' ? item.price : null;
           
-          let itemAddons = item.addons;
-          
-          // Default addons if not provided
-          if (!itemAddons) {
-            itemAddons = (cat.name === "QUICK BITES" || cat.name === "COMFORT FOOD") ? foodAddons : beverageAddons;
-            if (cat.name === "SWEET TREATS") {
-              itemAddons = null;
-            }
+          let itemAddons = (cat.name === "QUICK BITES" || cat.name === "COMFORT FOOD") ? foodAddons : beverageAddons;
+          if (cat.name === "SWEET TREATS") {
+            itemAddons = null;
           }
           
           return {
@@ -426,24 +407,19 @@ async function startServer() {
             price_fixed: fixed,
             description: item.description || "",
             image: item.image || null,
-            addons: itemAddons ? JSON.stringify(itemAddons) : null
+            addons: itemAddons
           };
         });
         
         const { error: itemError } = await supabase.from('items').insert(itemsToInsert);
-        if (itemError) {
-          console.error(`[API] /api/seed: Error inserting items for category ${cat.name}:`, itemError);
-          throw itemError;
-        }
-        console.log(`[API] /api/seed: Items for category ${cat.name} inserted.`);
+        if (itemError) throw itemError;
       }
 
       notifyUpdate("menu_updated");
       await syncMenuToFile();
-      console.log("[API] /api/seed: Seed successful.");
       res.json({ success: true });
     } catch (err) {
-      console.error("[API] /api/seed: Seed error:", err);
+      console.error("Seed error:", err);
       res.status(500).json({ error: "Failed to seed database", details: err instanceof Error ? err.message : (typeof err === 'object' ? JSON.stringify(err) : String(err)) });
     }
   });
