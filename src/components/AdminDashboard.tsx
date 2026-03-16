@@ -229,8 +229,10 @@ function AdminDashboardContent() {
         fetchMenu();
         alert("Menu updated successfully!");
       } catch (err) {
-        console.error("[AdminDashboard] Error seeding menu:", err);
-        alert("Error seeding menu: " + (err instanceof Error ? err.message : String(err)));
+        console.error("[AdminDashboard] Full error object:", err);
+        const errorMessage = err instanceof Error ? err.message : (typeof err === 'object' ? JSON.stringify(err) : String(err));
+        console.error("[AdminDashboard] Error seeding menu:", errorMessage);
+        alert("Error seeding menu: " + errorMessage);
       } finally {
         setIsSeeding(false);
       }
