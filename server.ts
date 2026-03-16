@@ -12,8 +12,14 @@ const __dirname = path.dirname(__filename);
 const menuDataPath = path.resolve(process.cwd(), "menu-data.json");
 
 // Initialize Supabase
-const supabaseUrl = process.env.SUPABASE_URL || "";
-const supabaseKey = process.env.SUPABASE_KEY || "";
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_KEY;
+
+if (!supabaseUrl || !supabaseKey) {
+  console.error("[SERVER] FATAL ERROR: SUPABASE_URL and SUPABASE_KEY must be set.");
+  process.exit(1);
+}
+
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 console.log("[SERVER] Supabase client initialized.");
