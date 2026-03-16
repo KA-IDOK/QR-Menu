@@ -487,17 +487,18 @@ async function startServer() {
     if (!addons) {
       const category = db.prepare("SELECT name FROM categories WHERE id = ?").get(category_id);
       if (category) {
-        if (category.name === "QUICK BITES" || category.name === "COMFORT FOOD") {
-          addons = JSON.stringify([{ name: "Rice", price: 30, available: true }]);
-        } else if (category.name === "SWEET TREATS") {
-          addons = null;
-        } else {
+        const catName = category.name;
+        if (catName === "SPECIALTY ESPRESSO BEVERAGES" || catName === "BODEGA X LINEAR COFFEE ROASTERS") {
           addons = JSON.stringify([
             { name: "Hazelnut", price: 30, available: true },
             { name: "Vanilla", price: 30, available: true },
             { name: "White chocolate", price: 30, available: true },
             { name: "Espresso Shot", price: 80, available: true }
           ]);
+        } else if (catName === "QUICK BITES" || catName === "COMFORT FOOD") {
+          addons = JSON.stringify([{ name: "Rice", price: 30, available: true }]);
+        } else {
+          addons = null;
         }
       }
     }

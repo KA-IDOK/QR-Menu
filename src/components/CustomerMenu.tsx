@@ -394,7 +394,13 @@ function CustomerMenuContent() {
                                 {item.addons && (() => {
                                   try {
                                     const addons = JSON.parse(item.addons);
-                                    return Array.isArray(addons) && addons.length > 0 && cat.name !== "SWEET TREATS";
+                                    const category = menu.find(c => c.id === item.category_id);
+                                    const catName = category?.name;
+                                    const isAllowed = catName === "SPECIALTY ESPRESSO BEVERAGES" || 
+                                                      catName === "BODEGA X LINEAR COFFEE ROASTERS" || 
+                                                      catName === "QUICK BITES" || 
+                                                      catName === "COMFORT FOOD";
+                                    return Array.isArray(addons) && addons.length > 0 && isAllowed;
                                   } catch (e) {
                                     return false;
                                   }
@@ -434,7 +440,13 @@ function CustomerMenuContent() {
                           {item.addons && (() => {
                             try {
                               const addons = JSON.parse(item.addons);
-                              return Array.isArray(addons) && addons.length > 0 && cat.name !== "SWEET TREATS";
+                              const category = menu.find(c => c.id === item.category_id);
+                              const catName = category?.name;
+                              const isAllowed = catName === "SPECIALTY ESPRESSO BEVERAGES" || 
+                                                catName === "BODEGA X LINEAR COFFEE ROASTERS" || 
+                                                catName === "QUICK BITES" || 
+                                                catName === "COMFORT FOOD";
+                              return Array.isArray(addons) && addons.length > 0 && isAllowed;
                             } catch (e) {
                               return false;
                             }

@@ -531,7 +531,12 @@ function AdminDashboardContent() {
                               try {
                                 const addons = JSON.parse(item.addons);
                                 const category = menu.find(c => c.id === item.category_id);
-                                return Array.isArray(addons) && addons.length > 0 && category?.name !== "SWEET TREATS";
+                                const catName = category?.name;
+                                const isAllowed = catName === "SPECIALTY ESPRESSO BEVERAGES" || 
+                                                  catName === "BODEGA X LINEAR COFFEE ROASTERS" || 
+                                                  catName === "QUICK BITES" || 
+                                                  catName === "COMFORT FOOD";
+                                return Array.isArray(addons) && addons.length > 0 && isAllowed;
                               } catch (e) {
                                 return false;
                               }
