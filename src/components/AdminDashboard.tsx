@@ -291,7 +291,28 @@ function AdminDashboardContent() {
     const reader = new FileReader();
     reader.onloadend = async () => {
       const base64 = reader.result as string;
-      setEditingItem(prev => prev ? { ...prev, image: base64 } : null);
+      
+      let savedItem: any = null;
+      setEditingItem(prev => {
+        savedItem = prev ? { ...prev, image: base64 } : null;
+        return savedItem;
+      });
+
+      // If it's an existing item, save immediately
+      if (savedItem && savedItem.id) {
+        setIsSaving(true);
+        try {
+          await apiFetch(`/api/items/${savedItem.id}`, {
+            method: 'PUT',
+            body: JSON.stringify(savedItem)
+          });
+          fetchMenu();
+        } catch (err) {
+          console.error("Error saving item image", err);
+        } finally {
+          setIsSaving(false);
+        }
+      }
     };
     reader.readAsDataURL(file);
   };
