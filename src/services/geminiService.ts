@@ -4,6 +4,7 @@ let ai: GoogleGenAI | null = null;
 
 function getAiClient(): GoogleGenAI {
   if (!ai) {
+    console.log("DEBUG: process.env keys:", Object.keys(process.env));
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       throw new Error("GEMINI_API_KEY environment variable is not set");
@@ -37,13 +38,14 @@ export async function extractMenuFromImage(base64Image: string) {
                       "name": "Item Name",
                       "price": 100, // Use a single price if only one is listed, or an object if multiple (e.g., hot/cold)
                       "prices": { "hot": 100, "cold": 120 }, // Optional: if multiple prices exist
-                      "description": "Optional description"
+                      "description": "Optional description",
+                      "addons": [ { "name": "Addon Name", "price": 30 } ] // Optional: list of add-ons
                     }
                   ]
                 }
               ]
             }
-            Include all items, categories, and prices accurately. For "ADD-ONS", treat them as items within their respective sections or a separate category if appropriate.`,
+            Include all items, categories, prices, and add-ons accurately.`,
           },
         ],
       },

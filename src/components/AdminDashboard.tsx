@@ -205,16 +205,32 @@ function AdminDashboardContent() {
     reader.onloadend = async () => {
       const base64 = (reader.result as string).split(',')[1];
       try {
+        console.log("[AdminDashboard] Starting menu extraction...");
         const extracted = await extractMenuFromImage(base64);
+        console.log("[AdminDashboard] Extraction result:", extracted);
         
-        await apiFetch('/api/seed', {
+        if (!extracted || !extracted.categories) {
+          throw new Error("Invalid extraction result: missing categories");
+        }
+
+        console.log("[AdminDashboard] Sending data to /api/seed...");
+        const response = await apiFetch('/api/seed', {
           method: 'POST',
           body: JSON.stringify(extracted)
         });
         
+        if (!response.ok) {
+          const errorData = await response.json();
+          console.error("[AdminDashboard] Server error during seed:", errorData);
+          throw new Error(errorData.error || "Failed to seed menu");
+        }
+        
+        console.log("[AdminDashboard] Seed successful.");
         fetchMenu();
+        alert("Menu updated successfully!");
       } catch (err) {
-        console.error("Error seeding menu", err);
+        console.error("[AdminDashboard] Error seeding menu:", err);
+        alert("Error seeding menu: " + (err instanceof Error ? err.message : String(err)));
       } finally {
         setIsSeeding(false);
       }
