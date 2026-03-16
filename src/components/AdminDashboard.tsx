@@ -6,21 +6,8 @@ import { Plus, Trash2, Save, Upload, RefreshCw, QrCode, LayoutDashboard, Setting
 import { extractMenuFromImage } from '../services/geminiService';
 import { generateMenuItemImage, generateCategoryImage } from '../services/imageService';
 import { motion, AnimatePresence } from 'motion/react';
-import { db, auth, handleFirestoreError, OperationType, signInWithGoogle } from '../firebase';
-import { onAuthStateChanged, signOut, User } from 'firebase/auth';
-import { 
-  collection, 
-  onSnapshot, 
-  doc, 
-  addDoc, 
-  updateDoc, 
-  deleteDoc, 
-  query, 
-  orderBy, 
-  serverTimestamp,
-  writeBatch,
-  getDocs
-} from 'firebase/firestore';
+import { apiFetch } from '../lib/api';
+import socket from '../lib/socket';
 
 // Error Boundary Component
 class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean, error: Error | null }> {
@@ -69,9 +56,7 @@ export default function AdminDashboard() {
 
 function AdminDashboardContent() {
   const navigate = useNavigate();
-  const [user, setUser] = useState<User | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [authLoading, setAuthLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(() => localStorage.getItem('is_admin') === 'true');
   const [menu, setMenu] = useState<Category[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
@@ -83,65 +68,64 @@ function AdminDashboardContent() {
   const [editingItem, setEditingItem] = useState<Partial<MenuItem> | null>(null);
   const [managingAddonsItem, setManagingAddonsItem] = useState<MenuItem | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-  const isGeneratingRef = React.useRef(false);
+  const [isGenerating, setIsGenerating] = useState(false);
 
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => {
-      setUser(u);
-      // Check if user is admin (hardcoded for now to match rules)
-      setIsAdmin(u?.email === 'renzohermano31@gmail.com');
-      setAuthLoading(false);
-    });
-    return () => unsub();
-  }, []);
-
-  useEffect(() => {
-    if (!isAdmin) return;
-    // Real-time categories and items
-    const categoriesUnsub = onSnapshot(collection(db, 'categories'), (catSnap) => {
-      const categoriesData = catSnap.docs.map(doc => ({ id: doc.id, ...doc.data(), items: [] } as Category));
-      
-      const itemsUnsub = onSnapshot(collection(db, 'items'), (itemSnap) => {
-        const itemsData = itemSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as MenuItem));
-        
-        const fullMenu = categoriesData.map(cat => ({
-          ...cat,
-          items: itemsData.filter(item => item.category_id === cat.id)
-        }));
-        
-        setMenu(fullMenu);
-        setLoading(false);
-      }, (err) => handleFirestoreError(err, OperationType.LIST, 'items'));
-
-      return () => itemsUnsub();
-    }, (err) => handleFirestoreError(err, OperationType.LIST, 'categories'));
-
-    // Real-time orders
-    const ordersQuery = query(collection(db, 'orders'), orderBy('created_at', 'desc'));
-    const ordersUnsub = onSnapshot(ordersQuery, (snap) => {
-      const ordersData = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
-      setOrders(ordersData);
-    }, (err) => handleFirestoreError(err, OperationType.LIST, 'orders'));
-
-    return () => {
-      categoriesUnsub();
-      ordersUnsub();
-    };
-  }, [isAdmin]);
-
-  const handleLogout = async () => {
+  const fetchMenu = async () => {
     try {
-      await signOut(auth);
-      navigate('/');
+      const res = await apiFetch('/api/menu');
+      const data = await res.json();
+      setMenu(data);
+      setLoading(false);
     } catch (err) {
-      console.error("Logout error", err);
+      console.error("Error fetching menu", err);
+    }
+  };
+
+  const fetchOrders = async () => {
+    try {
+      const res = await apiFetch('/api/admin/orders');
+      const data = await res.json();
+      setOrders(data);
+    } catch (err) {
+      console.error("Error fetching orders", err);
     }
   };
 
   useEffect(() => {
     if (!isAdmin) return;
-    const generateMissingImages = async () => {
-      if (isGeneratingRef.current || menu.length === 0) return;
+    fetchMenu();
+    fetchOrders();
+
+    socket.on('menu_updated', fetchMenu);
+    socket.on('order_created', fetchOrders);
+    socket.on('order_updated', fetchOrders);
+
+    return () => {
+      socket.off('menu_updated');
+      socket.off('order_created');
+      socket.off('order_updated');
+    };
+  }, [isAdmin]);
+
+  const handleLogout = () => {
+    setIsAdmin(false);
+    localStorage.removeItem('is_admin');
+    navigate('/');
+  };
+
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    const password = (e.target as any).password.value;
+    if (password === 'bodega2024') {
+      setIsAdmin(true);
+      localStorage.setItem('is_admin', 'true');
+    } else {
+      alert('Invalid password');
+    }
+  };
+
+  const generateMissingImages = async () => {
+    if (isGenerating || menu.length === 0) return;
       
       const allItems = menu.flatMap(c => c.items).filter(i => 
         !i.image || i.image.startsWith('https://images.unsplash.com/')
@@ -151,21 +135,26 @@ function AdminDashboardContent() {
         !c.image || c.image.startsWith('https://images.unsplash.com/')
       );
       
-      if (allItems.length === 0 && allCategories.length === 0) return;
-      
-      isGeneratingRef.current = true;
-      console.log(`[BG] Found ${allItems.length} items and ${allCategories.length} categories needing accurate photos.`);
-      
+    if (allItems.length === 0 && allCategories.length === 0) {
+      alert("All items and categories already have custom images!");
+      return;
+    }
+
+    if (!window.confirm(`Generate AI images for ${allCategories.length} categories and ${allItems.length} items? This may take a while.`)) {
+      return;
+    }
+
+    setIsGenerating(true);
+    try {
       // Generate Category Images First
       for (const cat of allCategories) {
         try {
-          console.log(`[BG] Generating photo for category: ${cat.name}`);
           const image = await generateCategoryImage(cat.name);
-          
-          await updateDoc(doc(db, 'categories', cat.id), { image });
-          
-          console.log(`[BG] Generated photo for category ${cat.name}`);
-          await new Promise(r => setTimeout(r, 2000));
+          await apiFetch(`/api/categories/${cat.id}`, {
+            method: 'PUT',
+            body: JSON.stringify({ image })
+          });
+          await new Promise(r => setTimeout(r, 1000));
         } catch (err) {
           console.error(`[BG] Failed for category ${cat.name}:`, err);
         }
@@ -173,35 +162,36 @@ function AdminDashboardContent() {
 
       // Generate Item Images
       for (const item of allItems) {
-        const currentItem = menu.flatMap(c => c.items).find(i => i.id === item.id);
-        if (!currentItem || (currentItem.image && !currentItem.image.startsWith('https://images.unsplash.com/'))) {
-          continue;
-        }
-
         try {
           const category = menu.find(c => c.id === item.category_id);
           const image = await generateMenuItemImage(item.name, category?.name || 'Menu', item.description);
-          
-          await updateDoc(doc(db, 'items', item.id), { image });
-          
-          console.log(`[BG] Generated photo for ${item.name}`);
-          await new Promise(r => setTimeout(r, 2000));
+          await apiFetch(`/api/items/${item.id}`, {
+            method: 'PUT',
+            body: JSON.stringify({ ...item, image })
+          });
+          await new Promise(r => setTimeout(r, 1000));
         } catch (err) {
           console.error(`[BG] Failed for ${item.name}:`, err);
         }
       }
-      
-      isGeneratingRef.current = false;
-    };
-
-    generateMissingImages();
-  }, [menu]);
+      alert("Image generation complete!");
+      fetchMenu();
+    } catch (err) {
+      console.error("Error generating images", err);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
   const updateOrderStatus = async (orderId: string, status: string, isPaid: boolean) => {
     try {
-      await updateDoc(doc(db, 'orders', orderId), { status, is_paid: isPaid });
+      await apiFetch(`/api/admin/orders/${orderId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ status, is_paid: isPaid })
+      });
+      fetchOrders();
     } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `orders/${orderId}`);
+      console.error("Error updating order", err);
     }
   };
 
@@ -209,6 +199,7 @@ function AdminDashboardContent() {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (!window.confirm("This will overwrite your entire menu. Are you sure?")) return;
     setIsSeeding(true);
     const reader = new FileReader();
     reader.onloadend = async () => {
@@ -216,34 +207,14 @@ function AdminDashboardContent() {
       try {
         const extracted = await extractMenuFromImage(base64);
         
-        // Seed to Firestore
-        const batch = writeBatch(db);
+        await apiFetch('/api/seed', {
+          method: 'POST',
+          body: JSON.stringify(extracted)
+        });
         
-        for (const cat of extracted.categories) {
-          const catRef = doc(collection(db, 'categories'));
-          batch.set(catRef, { name: cat.name });
-          
-          for (const item of cat.items) {
-            const itemRef = doc(collection(db, 'items'));
-            const hot = item.prices?.hot || (typeof item.price === 'object' ? item.price.hot : null);
-            const cold = item.prices?.cold || (typeof item.price === 'object' ? item.price.cold : null);
-            const fixed = typeof item.price === 'number' ? item.price : null;
-            
-            batch.set(itemRef, {
-              category_id: catRef.id,
-              name: item.name,
-              price_hot: hot,
-              price_cold: cold,
-              price_fixed: fixed,
-              description: item.description || "",
-              available: true
-            });
-          }
-        }
-        
-        await batch.commit();
+        fetchMenu();
       } catch (err) {
-        handleFirestoreError(err, OperationType.WRITE, 'bulk_seed');
+        console.error("Error seeding menu", err);
       } finally {
         setIsSeeding(false);
       }
@@ -253,20 +224,26 @@ function AdminDashboardContent() {
 
   const updateItemAvailability = async (id: string, available: boolean, addons?: string) => {
     try {
-      const updateData: any = { available };
-      if (addons !== undefined) updateData.addons = addons;
-      await updateDoc(doc(db, 'items', id), updateData);
+      const item = menu.flatMap(c => c.items).find(i => i.id === id);
+      if (!item) return;
+      
+      await apiFetch(`/api/items/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ ...item, available, addons: addons !== undefined ? addons : item.addons })
+      });
+      fetchMenu();
     } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `items/${id}`);
+      console.error("Error updating item", err);
     }
   };
 
   const deleteItem = async (id: string) => {
     if (!confirm('Are you sure?')) return;
     try {
-      await deleteDoc(doc(db, 'items', id));
+      await apiFetch(`/api/items/${id}`, { method: 'DELETE' });
+      fetchMenu();
     } catch (err) {
-      handleFirestoreError(err, OperationType.DELETE, `items/${id}`);
+      console.error("Error deleting item", err);
     }
   };
 
@@ -277,14 +254,20 @@ function AdminDashboardContent() {
     setIsSaving(true);
     try {
       if (editingItem.id) {
-        const { id, ...data } = editingItem;
-        await updateDoc(doc(db, 'items', id), data);
+        await apiFetch(`/api/items/${editingItem.id}`, {
+          method: 'PUT',
+          body: JSON.stringify(editingItem)
+        });
       } else {
-        await addDoc(collection(db, 'items'), editingItem);
+        await apiFetch('/api/items', {
+          method: 'POST',
+          body: JSON.stringify(editingItem)
+        });
       }
       setEditingItem(null);
+      fetchMenu();
     } catch (err) {
-      handleFirestoreError(err, editingItem.id ? OperationType.UPDATE : OperationType.CREATE, `items/${editingItem.id || 'new'}`);
+      console.error("Error saving item", err);
     } finally {
       setIsSaving(false);
     }
@@ -315,15 +298,6 @@ function AdminDashboardContent() {
 
   const customerUrl = window.location.origin;
 
-  if (authLoading) return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="animate-pulse flex flex-col items-center">
-        <Coffee className="w-12 h-12 text-black mb-4" />
-        <p className="text-black font-black uppercase tracking-widest text-xs">Verifying Admin...</p>
-      </div>
-    </div>
-  );
-
   if (!isAdmin) return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 p-6">
       <div className="bg-white p-12 rounded-[3rem] shadow-2xl border-4 border-black max-w-md w-full text-center">
@@ -333,28 +307,21 @@ function AdminDashboardContent() {
         <h2 className="text-4xl font-black uppercase tracking-tighter mb-4">Admin Portal</h2>
         <p className="text-gray-500 mb-10 font-bold uppercase tracking-widest text-xs">Authorized Personnel Only</p>
         
-        {user ? (
-          <div className="space-y-6">
-            <div className="p-4 bg-red-50 border-2 border-red-200 rounded-2xl">
-              <p className="text-red-600 font-bold text-sm">Access Denied</p>
-              <p className="text-red-400 text-[10px] font-bold uppercase tracking-widest mt-1">{user.email}</p>
-            </div>
-            <button 
-              onClick={handleLogout}
-              className="w-full bg-black text-white py-5 rounded-2xl font-black uppercase tracking-widest hover:bg-gray-800 transition-all shadow-xl"
-            >
-              Sign Out
-            </button>
-          </div>
-        ) : (
+        <form onSubmit={handleLogin} className="space-y-4">
+          <input 
+            type="password" 
+            name="password"
+            placeholder="Enter Admin Password"
+            className="w-full p-4 border-2 border-black rounded-xl focus:ring-0 focus:border-black font-bold text-center"
+            required
+          />
           <button 
-            onClick={signInWithGoogle}
-            className="w-full bg-black text-white py-5 rounded-2xl font-black uppercase tracking-widest hover:bg-gray-800 transition-all shadow-xl flex items-center justify-center gap-3"
+            type="submit"
+            className="w-full bg-black text-white py-5 rounded-2xl font-black uppercase tracking-widest hover:bg-gray-800 transition-all shadow-xl"
           >
-            <img src="https://www.google.com/favicon.ico" className="w-5 h-5 invert" alt="Google" />
-            Sign in with Google
+            Access Dashboard
           </button>
-        )}
+        </form>
       </div>
     </div>
   );
@@ -424,6 +391,25 @@ function AdminDashboardContent() {
             <input type="file" className="hidden" onChange={handleFileUpload} accept="image/*" />
           </label>
           <button 
+            onClick={() => {
+              if (window.confirm("Sync current database state to menu-data.json?")) {
+                apiFetch('/api/admin/sync', { method: 'POST' }).then(() => alert("Synced to file!"));
+              }
+            }}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 text-gray-400 hover:text-white transition-all mt-2"
+          >
+            <Save size={20} />
+            <span className="font-bold uppercase text-[10px] tracking-widest">Sync to File</span>
+          </button>
+          <button 
+            onClick={generateMissingImages}
+            disabled={isGenerating}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 text-gray-400 hover:text-white transition-all mt-2 disabled:opacity-50"
+          >
+            <RefreshCw size={20} className={isGenerating ? 'animate-spin' : ''} />
+            <span className="font-bold uppercase text-[10px] tracking-widest">{isGenerating ? 'Generating...' : 'Fill Missing Images'}</span>
+          </button>
+          <button 
             onClick={handleLogout}
             className="w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-red-500/10 text-red-400 hover:text-red-500 transition-all mt-2"
           >
@@ -486,7 +472,28 @@ function AdminDashboardContent() {
                 .map(cat => (
                 <section key={cat.id}>
                   <div className="flex items-center gap-6 mb-8">
-                    <h3 className="text-2xl font-black text-black uppercase tracking-tight">{cat.name}</h3>
+                    {cat.image && (
+                      <div className="w-16 h-16 rounded-2xl overflow-hidden border-2 border-black shrink-0">
+                        <img src={cat.image} alt={cat.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                      </div>
+                    )}
+                    <div className="flex-1">
+                      <h3 className="text-2xl font-black text-black uppercase tracking-tight">{cat.name}</h3>
+                      <button 
+                        onClick={() => {
+                          const newImage = window.prompt("Enter Category Image URL (or leave empty to generate):", cat.image || "");
+                          if (newImage !== null) {
+                            apiFetch(`/api/categories/${cat.id}`, {
+                              method: 'PUT',
+                              body: JSON.stringify({ image: newImage })
+                            }).then(fetchMenu);
+                          }
+                        }}
+                        className="text-[8px] font-black uppercase tracking-widest text-gray-400 hover:text-black transition-colors"
+                      >
+                        Change Image
+                      </button>
+                    </div>
                     <div className="h-1 flex-1 bg-black/5 rounded-full"></div>
                     <button 
                       onClick={() => openAddModal(cat.id)}

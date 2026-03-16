@@ -63,7 +63,8 @@ const syncMenuToFile = () => {
 db.exec(`
   CREATE TABLE IF NOT EXISTS categories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE
+    name TEXT NOT NULL UNIQUE,
+    image TEXT
   );
 
   CREATE TABLE IF NOT EXISTS items (
@@ -106,6 +107,10 @@ db.exec(`
 // Migration: Add image column if it doesn't exist (for existing databases)
 try {
   db.exec("ALTER TABLE items ADD COLUMN image TEXT");
+} catch (e) {}
+
+try {
+  db.exec("ALTER TABLE categories ADD COLUMN image TEXT");
 } catch (e) {}
 
 // Migration: Add addons column if it doesn't exist
@@ -283,7 +288,7 @@ if (categoryCount.count === 0) {
     ];
   }
 
-  const insertCategory = db.prepare("INSERT INTO categories (name) VALUES (?)");
+  const insertCategory = db.prepare("INSERT INTO categories (name, image) VALUES (?, ?)");
   const insertItem = db.prepare(`
     INSERT INTO items (category_id, name, price_hot, price_cold, price_fixed, image, addons)
     VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -301,7 +306,7 @@ if (categoryCount.count === 0) {
     ]);
 
     for (const cat of seedData) {
-      const catInfo = insertCategory.run(cat.name);
+      const catInfo = insertCategory.run(cat.name, cat.image || null);
       for (const item of cat.items) {
         const i = item as any;
         // Use foodAddons for QUICK BITES and COMFORT FOOD, beverageAddons for others, null for SWEET TREATS
@@ -440,19 +445,37 @@ async function startServer() {
   });
 
   // Body Parsing Middleware - ONLY AFTER GET ROUTES
-  app.use(express.json({ limit: '10mb' }));
+  app.use(express.json({ limit: '50mb' }));
 
   app.post("/api/categories", (req, res) => {
-    const { name } = req.body;
+    const { name, image } = req.body;
     console.log(`[API] Create category: ${name}`);
     try {
-      const info = db.prepare("INSERT INTO categories (name) VALUES (?)").run(name);
+      const info = db.prepare("INSERT INTO categories (name, image) VALUES (?, ?)").run(name, image);
       notifyUpdate("menu_updated");
       syncMenuToFile();
-      res.json({ id: info.lastInsertRowid, name });
+      res.json({ id: info.lastInsertRowid, name, image });
     } catch (e) {
       console.error("[API] Error creating category:", e);
       res.status(400).json({ error: "Category already exists or invalid data" });
+    }
+  });
+
+  app.put("/api/categories/:id", (req, res) => {
+    const { id } = req.params;
+    const { name, image } = req.body;
+    try {
+      if (name) {
+        db.prepare("UPDATE categories SET name = ?, image = ? WHERE id = ?").run(name, image, id);
+      } else {
+        db.prepare("UPDATE categories SET image = ? WHERE id = ?").run(image, id);
+      }
+      notifyUpdate("menu_updated");
+      syncMenuToFile();
+      res.json({ success: true });
+    } catch (e) {
+      console.error("[API] Error updating category:", e);
+      res.status(500).json({ error: "Internal server error" });
     }
   });
 
@@ -491,6 +514,7 @@ async function startServer() {
   app.put("/api/items/:id", (req, res) => {
     const { id } = req.params;
     const { name, price_hot, price_cold, price_fixed, description, available, image, addons } = req.body;
+    console.log(`[API] PUT /api/items/${id} | Body keys: ${Object.keys(req.body)} | Image length: ${image?.length}`);
     db.prepare(`
       UPDATE items 
       SET name = ?, price_hot = ?, price_cold = ?, price_fixed = ?, description = ?, available = ?, image = ?, addons = ?
@@ -547,16 +571,26 @@ async function startServer() {
     res.json({ success: true });
   });
 
+  app.post("/api/admin/sync", (req, res) => {
+    try {
+      syncMenuToFile();
+      res.json({ success: true });
+    } catch (err) {
+      console.error("Sync error:", err);
+      res.status(500).json({ error: "Failed to sync to file" });
+    }
+  });
+
   app.post("/api/seed", (req, res) => {
     const { categories } = req.body;
     
     const deleteItems = db.prepare("DELETE FROM items");
     const deleteCats = db.prepare("DELETE FROM categories");
     
-    const insertCat = db.prepare("INSERT INTO categories (name) VALUES (?)");
+    const insertCat = db.prepare("INSERT INTO categories (name, image) VALUES (?, ?)");
     const insertItem = db.prepare(`
-      INSERT INTO items (category_id, name, price_hot, price_cold, price_fixed, description, addons)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO items (category_id, name, price_hot, price_cold, price_fixed, description, image, addons)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const transaction = db.transaction((data) => {
@@ -574,7 +608,7 @@ async function startServer() {
       ]);
 
       for (const cat of data) {
-        const catInfo = insertCat.run(cat.name);
+        const catInfo = insertCat.run(cat.name, cat.image || null);
         const catId = catInfo.lastInsertRowid;
         for (const item of cat.items) {
           const hot = item.prices?.hot || (typeof item.price === 'object' ? item.price.hot : null);
@@ -586,7 +620,7 @@ async function startServer() {
             itemAddons = null;
           }
 
-          insertItem.run(catId, item.name, hot, cold, fixed, item.description || "", itemAddons);
+          insertItem.run(catId, item.name, hot, cold, fixed, item.description || "", item.image || null, itemAddons);
         }
       }
     });

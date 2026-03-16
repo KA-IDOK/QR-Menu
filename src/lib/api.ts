@@ -10,6 +10,7 @@ import socket from './socket';
 export const apiFetch = async (endpoint: string, options: RequestInit = {}, retries = 2) => {
   const headers = {
     'Accept': 'application/json',
+    'Content-Type': 'application/json',
     ...options.headers,
   };
   const url = typeof window !== 'undefined' ? (window.location.origin + endpoint) : endpoint;

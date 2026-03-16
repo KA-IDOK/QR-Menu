@@ -3,18 +3,8 @@ import { Category, MenuItem, Order } from '../types';
 import { Coffee, Info, ChevronRight, ShoppingBag, X, Plus, Minus, Trash2, History, CreditCard, RefreshCw, ClipboardList, Clock, Edit3, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
-import { db, auth, handleFirestoreError, OperationType } from '../firebase';
-import { 
-  collection, 
-  onSnapshot, 
-  doc, 
-  addDoc, 
-  updateDoc, 
-  query, 
-  where, 
-  orderBy, 
-  serverTimestamp 
-} from 'firebase/firestore';
+import { apiFetch } from '../lib/api';
+import socket from '../lib/socket';
 
 // Error Boundary Component
 class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean, error: Error | null }> {
@@ -85,12 +75,6 @@ function CustomerMenuContent() {
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<'GCash' | 'Card' | 'Counter'>('Counter');
-  const [pendingItem, setPendingItem] = useState<{ 
-    item: MenuItem, 
-    type: 'hot' | 'cold' | 'fixed', 
-    price: number,
-    selectedAddons: { name: string, price: number, quantity: number }[]
-  } | null>(null);
   
   const [customerId] = useState(() => {
     const saved = localStorage.getItem('cafe_customer_id');
@@ -102,46 +86,49 @@ function CustomerMenuContent() {
 
   const navigate = useNavigate();
 
+  const fetchMenu = async () => {
+    try {
+      const res = await apiFetch('/api/menu');
+      const data = await res.json();
+      setMenu(data);
+      setLoading(false);
+    } catch (err) {
+      console.error("Error fetching menu", err);
+    }
+  };
+
+  const fetchOrders = async () => {
+    try {
+      const res = await apiFetch(`/api/orders?customerId=${customerId}`);
+      const data = await res.json();
+      setOrders(data);
+    } catch (err) {
+      console.error("Error fetching orders", err);
+    }
+  };
+
   useEffect(() => {
-    // Real-time categories and items
-    const categoriesUnsub = onSnapshot(collection(db, 'categories'), (catSnap) => {
-      const categoriesData = catSnap.docs.map(doc => ({ id: doc.id, ...doc.data(), items: [] } as Category));
-      
-      const itemsUnsub = onSnapshot(collection(db, 'items'), (itemSnap) => {
-        const itemsData = itemSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as MenuItem));
-        
-        const fullMenu = categoriesData.map(cat => ({
-          ...cat,
-          items: itemsData.filter(item => item.category_id === cat.id)
-        }));
-        
-        setMenu(fullMenu);
-        setLoading(false);
-      }, (err) => handleFirestoreError(err, OperationType.LIST, 'items'));
+    fetchMenu();
+    fetchOrders();
 
-      return () => itemsUnsub();
-    }, (err) => handleFirestoreError(err, OperationType.LIST, 'categories'));
-
-    // Real-time orders for this customer
-    const ordersQuery = query(
-      collection(db, 'orders'), 
-      where('user_email', '==', customerId),
-      orderBy('created_at', 'desc')
-    );
-    const ordersUnsub = onSnapshot(ordersQuery, (snap) => {
-      const ordersData = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
-      setOrders(ordersData);
-    }, (err) => handleFirestoreError(err, OperationType.LIST, 'orders'));
+    // Real-time updates via Socket.io
+    socket.on('menu_updated', fetchMenu);
+    socket.on('order_created', (data) => {
+      if (data.user_email === customerId) fetchOrders();
+    });
+    socket.on('order_updated', (data) => {
+      if (data.user_email === customerId) fetchOrders();
+    });
 
     return () => {
-      categoriesUnsub();
-      ordersUnsub();
+      socket.off('menu_updated');
+      socket.off('order_created');
+      socket.off('order_updated');
     };
   }, [customerId]);
 
   const addToCart = (item: MenuItem, type: 'hot' | 'cold' | 'fixed', price: number) => {
     setCart(prev => {
-      // We check for same item, same type, AND same addons (empty for new items) to group them
       const existing = prev.find(i => 
         i.id === item.id && 
         i.selectedType === type && 
@@ -158,7 +145,6 @@ function CustomerMenuContent() {
       }
       return [...prev, { ...item, quantity: 1, selectedType: type, selectedPrice: price, selectedAddons: [] }];
     });
-    // Show cart automatically so they can add add-ons
     setShowCart(true);
   };
 
@@ -181,29 +167,30 @@ function CustomerMenuContent() {
     if (cart.length === 0) return;
     setIsSubmittingOrder(true);
     try {
-      await addDoc(collection(db, 'orders'), {
-        user_email: customerId,
-        total: cartTotal,
-        payment_method: paymentMethod,
-        status: 'pending',
-        is_paid: false,
-        created_at: serverTimestamp(),
-        items: cart.map(i => ({
-          menu_item_id: i.id,
-          name: i.name,
-          price: i.selectedPrice,
-          quantity: i.quantity,
-          type: i.selectedType,
-          selected_addons: i.selectedAddons
-        }))
+      await apiFetch('/api/orders', {
+        method: 'POST',
+        body: JSON.stringify({
+          user_email: customerId,
+          total: cartTotal,
+          payment_method: paymentMethod,
+          items: cart.map(i => ({
+            id: i.id,
+            name: i.name,
+            price: i.selectedPrice,
+            quantity: i.quantity,
+            type: i.selectedType,
+            selectedAddons: i.selectedAddons
+          }))
+        })
       });
       
       setCart([]);
       setShowCart(false);
       setShowPaymentModal(false);
       setShowOrderTracker(true);
+      fetchOrders();
     } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, 'orders');
+      console.error("Error submitting order", err);
     } finally {
       setIsSubmittingOrder(false);
     }
@@ -235,9 +222,10 @@ function CustomerMenuContent() {
 
   const handlePay = async (orderId: string) => {
     try {
-      await updateDoc(doc(db, 'orders', orderId), { is_paid: true });
+      await apiFetch(`/api/orders/${orderId}/pay`, { method: 'PUT' });
+      fetchOrders();
     } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `orders/${orderId}`);
+      console.error("Error paying order", err);
     }
   };
 
