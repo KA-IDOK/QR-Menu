@@ -29,6 +29,7 @@ export const apiFetch = async (endpoint: string, options: RequestInit = {}, retr
         const text = await response.text();
         console.error(`[API] Request failed: ${response.status}`, text);
         socket.emit('client_log', { message: `[API] Request failed: ${response.status} - ${text}`, error: true });
+        throw new Error(`Request failed: ${response.status} - ${text}`);
       }
 
       return response;
