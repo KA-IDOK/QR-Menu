@@ -12,14 +12,8 @@ const __dirname = path.dirname(__filename);
 const menuDataPath = path.resolve(process.cwd(), "menu-data.json");
 
 // Initialize Supabase
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_KEY;
-
-if (!supabaseUrl || !supabaseKey) {
-  console.error("[SERVER] FATAL ERROR: SUPABASE_URL and SUPABASE_KEY must be set.");
-  process.exit(1);
-}
-
+const supabaseUrl = process.env.SUPABASE_URL || "";
+const supabaseKey = process.env.SUPABASE_KEY || "";
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 console.log("[SERVER] Supabase client initialized.");
@@ -119,7 +113,7 @@ async function startServer() {
       res.json(menu);
     } catch (err) {
       console.error("[API] Error /menu:", err);
-      res.status(500).json({ error: "Internal server error", details: err instanceof Error ? err.message : (typeof err === 'object' ? JSON.stringify(err) : String(err)) });
+      res.status(500).json({ error: "Internal server error", details: err instanceof Error ? err.message : String(err) });
     }
   };
 
@@ -157,7 +151,7 @@ async function startServer() {
       res.json(ordersWithItems);
     } catch (err) {
       console.error("[API] Error fetching orders:", err);
-      res.status(500).json({ error: "Internal server error", details: err instanceof Error ? err.message : (typeof err === 'object' ? JSON.stringify(err) : String(err)) });
+      res.status(500).json({ error: "Internal server error" });
     }
   });
 
@@ -185,7 +179,7 @@ async function startServer() {
       res.json(ordersWithItems);
     } catch (err) {
       console.error("[API] Error fetching admin orders:", err);
-      res.status(500).json({ error: "Internal server error", details: err instanceof Error ? err.message : (typeof err === 'object' ? JSON.stringify(err) : String(err)) });
+      res.status(500).json({ error: "Internal server error" });
     }
   });
 
@@ -229,7 +223,7 @@ async function startServer() {
       res.json({ success: true });
     } catch (e) {
       console.error("[API] Error updating category:", e);
-      res.status(500).json({ error: "Internal server error", details: e instanceof Error ? e.message : (typeof e === 'object' ? JSON.stringify(e) : String(e)) });
+      res.status(500).json({ error: "Internal server error" });
     }
   });
 
@@ -329,7 +323,7 @@ async function startServer() {
       res.json({ id: orderId, success: true });
     } catch (err) {
       console.error("[API] Error creating order:", err);
-      res.status(500).json({ error: "Internal server error", details: err instanceof Error ? err.message : (typeof err === 'object' ? JSON.stringify(err) : String(err)) });
+      res.status(500).json({ error: "Internal server error" });
     }
   });
 
@@ -363,7 +357,7 @@ async function startServer() {
       res.json({ success: true });
     } catch (err) {
       console.error("Sync error:", err);
-      res.status(500).json({ error: "Failed to sync to file", details: err instanceof Error ? err.message : (typeof err === 'object' ? JSON.stringify(err) : String(err)) });
+      res.status(500).json({ error: "Failed to sync to file" });
     }
   });
 
@@ -426,7 +420,7 @@ async function startServer() {
       res.json({ success: true });
     } catch (err) {
       console.error("Seed error:", err);
-      res.status(500).json({ error: "Failed to seed database", details: err instanceof Error ? err.message : (typeof err === 'object' ? JSON.stringify(err) : String(err)) });
+      res.status(500).json({ error: "Failed to seed database" });
     }
   });
 
