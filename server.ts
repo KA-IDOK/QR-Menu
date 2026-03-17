@@ -361,69 +361,6 @@ async function startServer() {
     }
   });
 
-  app.post("/api/seed", async (req, res) => {
-    const { categories } = req.body;
-    
-    try {
-      // Delete existing data
-      await supabase.from('order_items').delete().neq('id', 0);
-      await supabase.from('orders').delete().neq('id', 0);
-      await supabase.from('items').delete().neq('id', 0);
-      await supabase.from('categories').delete().neq('id', 0);
-      
-      const beverageAddons = [
-        { name: "Hazelnut", price: 30, available: true },
-        { name: "Vanilla", price: 30, available: true },
-        { name: "White chocolate", price: 30, available: true },
-        { name: "Espresso Shot", price: 80, available: true }
-      ];
-      const foodAddons = [{ name: "Rice", price: 30, available: true }];
-
-      for (const cat of categories) {
-        const { data: catData, error: catError } = await supabase
-          .from('categories')
-          .insert([{ name: cat.name, image: cat.image || null }])
-          .select()
-          .single();
-        if (catError) throw catError;
-        
-        const catId = catData.id;
-        
-        const itemsToInsert = cat.items.map((item: any) => {
-          const hot = item.prices?.hot || (typeof item.price === 'object' ? item.price.hot : null);
-          const cold = item.prices?.cold || (typeof item.price === 'object' ? item.price.cold : null);
-          const fixed = typeof item.price === 'number' ? item.price : null;
-          
-          let itemAddons = (cat.name === "QUICK BITES" || cat.name === "COMFORT FOOD") ? foodAddons : beverageAddons;
-          if (cat.name === "SWEET TREATS") {
-            itemAddons = null;
-          }
-          
-          return {
-            category_id: catId,
-            name: item.name,
-            price_hot: hot,
-            price_cold: cold,
-            price_fixed: fixed,
-            description: item.description || "",
-            image: item.image || null,
-            addons: itemAddons
-          };
-        });
-        
-        const { error: itemError } = await supabase.from('items').insert(itemsToInsert);
-        if (itemError) throw itemError;
-      }
-
-      notifyUpdate("menu_updated");
-      await syncMenuToFile();
-      res.json({ success: true });
-    } catch (err) {
-      console.error("Seed error:", err);
-      res.status(500).json({ error: "Failed to seed database" });
-    }
-  });
-
   // Catch-all for API routes to prevent falling through to Vite/SPA fallback
   app.all("/api/*", (req, res) => {
     console.log(`API 404: ${req.method} ${req.url}`);

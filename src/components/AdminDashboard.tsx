@@ -3,8 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { Category, MenuItem, Order } from '../types';
 import { QRCodeSVG } from 'qrcode.react';
 import { Plus, Trash2, Save, Upload, RefreshCw, QrCode, LayoutDashboard, Settings, Coffee, Edit3, X, Image as ImageIcon, ShoppingCart, CheckCircle, Clock, CreditCard, History, Check, AlertCircle } from 'lucide-react';
-import { extractMenuFromImage } from '../services/geminiService';
-import { generateMenuItemImage, generateCategoryImage } from '../services/imageService';
 import { motion, AnimatePresence } from 'motion/react';
 import { apiFetch } from '../lib/api';
 import socket from '../lib/socket';
@@ -60,7 +58,6 @@ function AdminDashboardContent() {
   const [menu, setMenu] = useState<Category[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isSeeding, setIsSeeding] = useState(false);
   const [view, setView] = useState<'items' | 'qr' | 'orders'>('items');
   const [activeAdminCategory, setActiveAdminCategory] = useState<string | null>(null);
   
@@ -68,7 +65,6 @@ function AdminDashboardContent() {
   const [editingItem, setEditingItem] = useState<Partial<MenuItem> | null>(null);
   const [managingAddonsItem, setManagingAddonsItem] = useState<MenuItem | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-  const [isGenerating, setIsGenerating] = useState(false);
 
   const fetchMenu = async () => {
     try {
@@ -124,65 +120,6 @@ function AdminDashboardContent() {
     }
   };
 
-  const generateMissingImages = async () => {
-    if (isGenerating || menu.length === 0) return;
-      
-      const allItems = menu.flatMap(c => c.items).filter(i => 
-        !i.image || i.image.startsWith('https://images.unsplash.com/')
-      );
-
-      const allCategories = menu.filter(c => 
-        !c.image || c.image.startsWith('https://images.unsplash.com/')
-      );
-      
-    if (allItems.length === 0 && allCategories.length === 0) {
-      alert("All items and categories already have custom images!");
-      return;
-    }
-
-    if (!window.confirm(`Generate AI images for ${allCategories.length} categories and ${allItems.length} items? This may take a while.`)) {
-      return;
-    }
-
-    setIsGenerating(true);
-    try {
-      // Generate Category Images First
-      for (const cat of allCategories) {
-        try {
-          const image = await generateCategoryImage(cat.name);
-          await apiFetch(`/api/categories/${cat.id}`, {
-            method: 'PUT',
-            body: JSON.stringify({ image })
-          });
-          await new Promise(r => setTimeout(r, 1000));
-        } catch (err) {
-          console.error(`[BG] Failed for category ${cat.name}:`, err);
-        }
-      }
-
-      // Generate Item Images
-      for (const item of allItems) {
-        try {
-          const category = menu.find(c => c.id === item.category_id);
-          const image = await generateMenuItemImage(item.name, category?.name || 'Menu', item.description);
-          await apiFetch(`/api/items/${item.id}`, {
-            method: 'PUT',
-            body: JSON.stringify({ ...item, image })
-          });
-          await new Promise(r => setTimeout(r, 1000));
-        } catch (err) {
-          console.error(`[BG] Failed for ${item.name}:`, err);
-        }
-      }
-      alert("Image generation complete!");
-      fetchMenu();
-    } catch (err) {
-      console.error("Error generating images", err);
-    } finally {
-      setIsGenerating(false);
-    }
-  };
-
   const updateOrderStatus = async (orderId: string, status: string, isPaid: boolean) => {
     try {
       await apiFetch(`/api/admin/orders/${orderId}`, {
@@ -193,33 +130,6 @@ function AdminDashboardContent() {
     } catch (err) {
       console.error("Error updating order", err);
     }
-  };
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (!window.confirm("This will overwrite your entire menu. Are you sure?")) return;
-    setIsSeeding(true);
-    const reader = new FileReader();
-    reader.onloadend = async () => {
-      const base64 = (reader.result as string).split(',')[1];
-      try {
-        const extracted = await extractMenuFromImage(base64);
-        
-        await apiFetch('/api/seed', {
-          method: 'POST',
-          body: JSON.stringify(extracted)
-        });
-        
-        fetchMenu();
-      } catch (err) {
-        console.error("Error seeding menu", err);
-      } finally {
-        setIsSeeding(false);
-      }
-    };
-    reader.readAsDataURL(file);
   };
 
   const updateItemAvailability = async (id: string, available: boolean, addons?: string) => {
@@ -406,11 +316,6 @@ function AdminDashboardContent() {
         </nav>
 
         <div className="pt-6 border-t border-white/10">
-          <label className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 text-gray-400 hover:text-white cursor-pointer transition-all">
-            <Upload size={20} />
-            <span className="font-bold uppercase text-[10px] tracking-widest">Import Image</span>
-            <input type="file" className="hidden" onChange={handleFileUpload} accept="image/*" />
-          </label>
           <button 
             onClick={() => {
               if (window.confirm("Sync current database state to menu-data.json?")) {
@@ -421,14 +326,6 @@ function AdminDashboardContent() {
           >
             <Save size={20} />
             <span className="font-bold uppercase text-[10px] tracking-widest">Sync to File</span>
-          </button>
-          <button 
-            onClick={generateMissingImages}
-            disabled={isGenerating}
-            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 text-gray-400 hover:text-white transition-all mt-2 disabled:opacity-50"
-          >
-            <RefreshCw size={20} className={isGenerating ? 'animate-spin' : ''} />
-            <span className="font-bold uppercase text-[10px] tracking-widest">{isGenerating ? 'Generating...' : 'Fill Missing Images'}</span>
           </button>
           <button 
             onClick={handleLogout}
@@ -442,16 +339,6 @@ function AdminDashboardContent() {
 
       {/* Main Content */}
       <main className="flex-1 p-10 overflow-y-auto bg-white">
-        {isSeeding && (
-          <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center">
-            <div className="bg-white p-12 rounded-3xl shadow-2xl flex flex-col items-center border-4 border-[#4A3728]">
-              <RefreshCw className="animate-spin text-[#4A3728] mb-6" size={48} />
-              <p className="font-black text-2xl text-black uppercase tracking-tighter">AI Extraction...</p>
-              <p className="text-xs text-gray-500 font-bold uppercase tracking-widest mt-2">Processing your menu image</p>
-            </div>
-          </div>
-        )}
-
         {view === 'items' ? (
           <div className="max-w-5xl mx-auto">
             <div className="flex justify-between items-end mb-8">
