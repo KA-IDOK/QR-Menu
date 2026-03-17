@@ -202,19 +202,16 @@ function AdminDashboardContent() {
     reader.onloadend = async () => {
       const base64 = reader.result as string;
       
-      let savedItem: any = null;
-      setEditingItem(prev => {
-        savedItem = prev ? { ...prev, image: base64 } : null;
-        return savedItem;
-      });
+      const updatedItem = editingItem ? { ...editingItem, image: base64 } : null;
+      setEditingItem(updatedItem);
 
       // If it's an existing item, save immediately
-      if (savedItem && savedItem.id) {
+      if (updatedItem && updatedItem.id) {
         setIsSaving(true);
         try {
-          await apiFetch(`/api/items/${savedItem.id}`, {
+          await apiFetch(`/api/items/${updatedItem.id}`, {
             method: 'PUT',
-            body: JSON.stringify(savedItem)
+            body: JSON.stringify(updatedItem)
           });
           fetchMenu();
         } catch (err) {
@@ -389,7 +386,7 @@ function AdminDashboardContent() {
                       <h3 className="text-2xl font-black text-black uppercase tracking-tight">{cat.name}</h3>
                       <button 
                         onClick={() => {
-                          const newImage = window.prompt("Enter Category Image URL (or leave empty to generate):", cat.image || "");
+                          const newImage = window.prompt("Enter Category Image URL:", cat.image || "");
                           if (newImage !== null) {
                             apiFetch(`/api/categories/${cat.id}`, {
                               method: 'PUT',

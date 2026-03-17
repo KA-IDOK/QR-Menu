@@ -110,6 +110,9 @@ async function startServer() {
       }));
       
       console.log(`[API] /menu returning ${menu.length} categories`);
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
       res.json(menu);
     } catch (err) {
       console.error("[API] Error /menu:", err);
@@ -228,66 +231,81 @@ async function startServer() {
   });
 
   app.post("/api/items", async (req, res) => {
-    const { category_id, name, price_hot, price_cold, price_fixed, description, image } = req.body;
-    let { addons } = req.body;
+    try {
+      const { category_id, name, price_hot, price_cold, price_fixed, description, image } = req.body;
+      let { addons } = req.body;
 
-    // Default addons if not provided
-    if (!addons) {
-      const { data: category } = await supabase.from('categories').select('name').eq('id', category_id).single();
-      if (category) {
-        const catName = category.name;
-        if (catName === "SPECIALTY ESPRESSO BEVERAGES" || catName === "BODEGA X LINEAR COFFEE ROASTERS") {
-          addons = [
-            { name: "Hazelnut", price: 30, available: true },
-            { name: "Vanilla", price: 30, available: true },
-            { name: "White chocolate", price: 30, available: true },
-            { name: "Espresso Shot", price: 80, available: true }
-          ];
-        } else if (catName === "QUICK BITES" || catName === "COMFORT FOOD") {
-          addons = [{ name: "Rice", price: 30, available: true }];
-        } else {
-          addons = null;
+      // Default addons if not provided
+      if (!addons) {
+        const { data: category } = await supabase.from('categories').select('name').eq('id', category_id).single();
+        if (category) {
+          const catName = category.name;
+          if (catName === "SPECIALTY ESPRESSO BEVERAGES" || catName === "BODEGA X LINEAR COFFEE ROASTERS") {
+            addons = [
+              { name: "Hazelnut", price: 30, available: true },
+              { name: "Vanilla", price: 30, available: true },
+              { name: "White chocolate", price: 30, available: true },
+              { name: "Espresso Shot", price: 80, available: true }
+            ];
+          } else if (catName === "QUICK BITES" || catName === "COMFORT FOOD") {
+            addons = [{ name: "Rice", price: 30, available: true }];
+          } else {
+            addons = null;
+          }
         }
       }
+
+      const { data, error } = await supabase
+        .from('items')
+        .insert([{ category_id, name, price_hot, price_cold, price_fixed, description, image, addons }])
+        .select();
+      if (error) throw error;
+
+      notifyUpdate("menu_updated");
+      await syncMenuToFile();
+      res.json(data[0]);
+    } catch (e) {
+      console.error("[API] Error creating item:", e);
+      res.status(500).json({ error: "Internal server error" });
     }
-
-    const { data, error } = await supabase
-      .from('items')
-      .insert([{ category_id, name, price_hot, price_cold, price_fixed, description, image, addons }])
-      .select();
-    if (error) throw error;
-
-    notifyUpdate("menu_updated");
-    await syncMenuToFile();
-    res.json(data[0]);
   });
 
   app.put("/api/items/:id", async (req, res) => {
-    const { id } = req.params;
-    const { name, price_hot, price_cold, price_fixed, description, available, image, addons } = req.body;
-    console.log(`[API] PUT /api/items/${id} | Body keys: ${Object.keys(req.body)} | Image length: ${image?.length}`);
-    
-    const { error } = await supabase
-      .from('items')
-      .update({ name, price_hot, price_cold, price_fixed, description, available, image, addons })
-      .eq('id', id);
-    if (error) throw error;
-    
-    notifyUpdate("menu_updated");
-    await syncMenuToFile();
-    res.json({ success: true });
+    try {
+      const { id } = req.params;
+      const { name, price_hot, price_cold, price_fixed, description, available, image, addons } = req.body;
+      console.log(`[API] PUT /api/items/${id} | Body keys: ${Object.keys(req.body)} | Image length: ${image?.length}`);
+      
+      const { error } = await supabase
+        .from('items')
+        .update({ name, price_hot, price_cold, price_fixed, description, available, image, addons })
+        .eq('id', id);
+      if (error) throw error;
+      
+      notifyUpdate("menu_updated");
+      await syncMenuToFile();
+      res.json({ success: true });
+    } catch (e) {
+      console.error("[API] Error updating item:", e);
+      res.status(500).json({ error: "Internal server error" });
+    }
   });
 
   app.delete("/api/items/:id", async (req, res) => {
-    const { error } = await supabase
-      .from('items')
-      .delete()
-      .eq('id', req.params.id);
-    if (error) throw error;
-    
-    notifyUpdate("menu_updated");
-    await syncMenuToFile();
-    res.json({ success: true });
+    try {
+      const { error } = await supabase
+        .from('items')
+        .delete()
+        .eq('id', req.params.id);
+      if (error) throw error;
+      
+      notifyUpdate("menu_updated");
+      await syncMenuToFile();
+      res.json({ success: true });
+    } catch (e) {
+      console.error("[API] Error deleting item:", e);
+      res.status(500).json({ error: "Internal server error" });
+    }
   });
 
   // Order Routes
