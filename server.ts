@@ -18,6 +18,47 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 console.log("[SERVER] Supabase client initialized.");
 
+// Helper to upload base64 image to Supabase Storage
+const uploadBase64ToStorage = async (base64Str: string, folder: string, filenamePrefix: string): Promise<string> => {
+  if (!base64Str || !base64Str.startsWith('data:image')) {
+    return base64Str;
+  }
+
+  try {
+    const matches = base64Str.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+    if (!matches || matches.length !== 3) {
+      return base64Str;
+    }
+
+    const contentType = matches[1];
+    const base64Data = matches[2];
+    const buffer = Buffer.from(base64Data, 'base64');
+    const ext = contentType.split('/')[1] || 'png';
+    const filePath = `${folder}/${filenamePrefix}_${Date.now()}.${ext}`;
+
+    const { data, error } = await supabase.storage
+      .from('menu-images')
+      .upload(filePath, buffer, {
+        contentType,
+        upsert: true
+      });
+
+    if (error) {
+      console.error("[Storage] Upload error:", error);
+      return base64Str; // Fallback to base64 if upload fails
+    }
+
+    const { data: publicUrlData } = supabase.storage
+      .from('menu-images')
+      .getPublicUrl(filePath);
+
+    return publicUrlData.publicUrl;
+  } catch (err) {
+    console.error("[Storage] Exception during upload:", err);
+    return base64Str;
+  }
+};
+
 // Helper to sync database to JSON file for "code permanence"
 const syncMenuToFile = async () => {
   try {
@@ -190,9 +231,13 @@ async function startServer() {
   app.use(express.json({ limit: '50mb' }));
 
   app.post("/api/categories", async (req, res) => {
-    const { name, image } = req.body;
+    let { name, image } = req.body;
     console.log(`[API] Create category: ${name}`);
     try {
+      if (image && image.startsWith('data:image')) {
+        image = await uploadBase64ToStorage(image, 'categories', `cat_${Date.now()}`);
+      }
+
       const { data, error } = await supabase
         .from('categories')
         .insert([{ name, image }])
@@ -210,8 +255,12 @@ async function startServer() {
 
   app.put("/api/categories/:id", async (req, res) => {
     const { id } = req.params;
-    const { name, image } = req.body;
+    let { name, image } = req.body;
     try {
+      if (image && image.startsWith('data:image')) {
+        image = await uploadBase64ToStorage(image, 'categories', `cat_${id}`);
+      }
+
       const updateData: any = { image };
       if (name) updateData.name = name;
       
@@ -232,8 +281,12 @@ async function startServer() {
 
   app.post("/api/items", async (req, res) => {
     try {
-      const { category_id, name, price_hot, price_cold, price_fixed, description, image } = req.body;
+      let { category_id, name, price_hot, price_cold, price_fixed, description, image } = req.body;
       let { addons } = req.body;
+
+      if (image && image.startsWith('data:image')) {
+        image = await uploadBase64ToStorage(image, 'items', `item_${Date.now()}`);
+      }
 
       // Default addons if not provided
       if (!addons) {
@@ -273,9 +326,13 @@ async function startServer() {
   app.put("/api/items/:id", async (req, res) => {
     try {
       const { id } = req.params;
-      const { name, price_hot, price_cold, price_fixed, description, available, image, addons } = req.body;
+      let { name, price_hot, price_cold, price_fixed, description, available, image, addons } = req.body;
       console.log(`[API] PUT /api/items/${id} | Body keys: ${Object.keys(req.body)} | Image length: ${image?.length}`);
       
+      if (image && image.startsWith('data:image')) {
+        image = await uploadBase64ToStorage(image, 'items', `item_${id}`);
+      }
+
       const { error } = await supabase
         .from('items')
         .update({ name, price_hot, price_cold, price_fixed, description, available, image, addons })
