@@ -1,3 +1,4 @@
+import "dotenv/config";
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import { createClient } from "@supabase/supabase-js";
@@ -14,9 +15,15 @@ const menuDataPath = path.resolve(process.cwd(), "menu-data.json");
 // Initialize Supabase
 const supabaseUrl = process.env.SUPABASE_URL || "";
 const supabaseKey = process.env.SUPABASE_KEY || "";
-const supabase = createClient(supabaseUrl, supabaseKey);
 
-console.log("[SERVER] Supabase client initialized.");
+console.log("[SERVER] Supabase URL:", supabaseUrl ? "Present" : "Missing");
+console.log("[SERVER] Supabase Key:", supabaseKey ? "Present" : "Missing");
+
+if (!supabaseUrl || !supabaseKey) {
+  console.warn("[SERVER] WARNING: Supabase credentials missing. Running in fallback mode with local JSON.");
+}
+
+const supabase = createClient(supabaseUrl, supabaseKey);
 
 // Helper to upload base64 image to Supabase Storage
 const uploadBase64ToStorage = async (base64Str: string, folder: string, filenamePrefix: string): Promise<string> => {
@@ -61,12 +68,16 @@ const uploadBase64ToStorage = async (base64Str: string, folder: string, filename
 
 // Helper to sync database to JSON file for "code permanence"
 const syncMenuToFile = async () => {
+  if (!supabaseUrl || !supabaseKey) {
+    console.warn("[SERVER] Supabase not configured, skipping syncMenuToFile");
+    return;
+  }
   try {
-    const { data: categories, error: catError } = await supabase.from('categories').select('*');
+    const { data: categories, error: catError } = await supabase.from('categories').select('*').order('sort_order', { ascending: true });
     if (catError) throw catError;
     
     const menu = await Promise.all(categories.map(async (cat: any) => {
-      const { data: items, error: itemError } = await supabase.from('items').select('*').eq('category_id', cat.id);
+      const { data: items, error: itemError } = await supabase.from('items').select('*').eq('category_id', cat.id).order('sort_order', { ascending: true });
       if (itemError) throw itemError;
       return { ...cat, items };
     }));
@@ -94,6 +105,18 @@ async function startServer() {
   const isProd = process.env.NODE_ENV === 'production';
 
   let cachedMenu: any = null;
+
+  // Load initial menu from file if it exists
+  try {
+    if (fs.existsSync(menuDataPath)) {
+      const fileData = fs.readFileSync(menuDataPath, 'utf8');
+      const parsed = JSON.parse(fileData);
+      cachedMenu = parsed.categories || parsed;
+      console.log("[SERVER] Initialized cachedMenu from menu-data.json");
+    }
+  } catch (err) {
+    console.error("[SERVER] Error loading initial menu-data.json:", err);
+  }
 
   // Helper to notify all clients of updates
   const notifyUpdate = (type: string, data?: any) => {
@@ -151,34 +174,51 @@ async function startServer() {
         return res.json(cachedMenu);
       }
 
-      const [categoriesRes, itemsRes] = await Promise.all([
-        supabase.from('categories').select('*'),
-        supabase.from('items').select('*')
-      ]);
+      // If no cache, try fetching from Supabase
+      if (supabaseUrl && supabaseKey) {
+        const [categoriesRes, itemsRes] = await Promise.all([
+          supabase.from('categories').select('*').order('sort_order', { ascending: true }),
+          supabase.from('items').select('*').order('sort_order', { ascending: true })
+        ]);
 
-      if (categoriesRes.error) throw categoriesRes.error;
-      if (itemsRes.error) throw itemsRes.error;
-      
-      const categories = categoriesRes.data || [];
-      const items = itemsRes.data || [];
+        if (!categoriesRes.error && !itemsRes.error) {
+          const categories = categoriesRes.data || [];
+          const items = itemsRes.data || [];
 
-      const menu = categories.map((cat: any) => {
-        return {
-          ...cat,
-          items: items.filter((item: any) => item.category_id === cat.id)
-        };
-      });
-      
-      console.log(`[API] /menu returning ${menu.length} categories (fetched from DB)`);
-      cachedMenu = menu;
-      
-      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-      res.setHeader('Pragma', 'no-cache');
-      res.setHeader('Expires', '0');
-      res.json(menu);
-    } catch (err) {
+          const menu = categories.map((cat: any) => {
+            return {
+              ...cat,
+              items: items.filter((item: any) => item.category_id === cat.id)
+            };
+          });
+          
+          console.log(`[API] /menu returning ${menu.length} categories (fetched from DB)`);
+          cachedMenu = menu;
+          return res.json(menu);
+        } else {
+          console.error("[API] Supabase error fetching menu:", categoriesRes.error || itemsRes.error);
+        }
+      } else {
+        console.warn("[API] Supabase not configured, cannot fetch fresh menu");
+      }
+
+      // Fallback to file if DB fails or is not configured
+      if (fs.existsSync(menuDataPath)) {
+        const fileData = fs.readFileSync(menuDataPath, 'utf8');
+        const parsed = JSON.parse(fileData);
+        const menu = parsed.categories || parsed;
+        cachedMenu = menu;
+        console.log("[API] Returning menu from menu-data.json (fallback)");
+        return res.json(menu);
+      }
+
+      throw new Error("Menu data not available (DB failed and no local file)");
+    } catch (err: any) {
       console.error("[API] Error /menu:", err);
-      res.status(500).json({ error: "Internal server error", details: err instanceof Error ? err.message : String(err) });
+      res.status(500).json({ 
+        error: "Internal server error", 
+        details: err.message || String(err) 
+      });
     }
   };
 
@@ -193,6 +233,9 @@ async function startServer() {
     if (!identifier) return res.status(400).json({ error: "Identifier required" });
 
     try {
+      if (!supabaseUrl || !supabaseKey) {
+        throw new Error("Supabase not configured");
+      }
       const { data: orders, error: orderError } = await supabase
         .from('orders')
         .select('*')
@@ -214,9 +257,9 @@ async function startServer() {
         return { ...order, items: itemsWithAddons };
       }));
       res.json(ordersWithItems);
-    } catch (err) {
+    } catch (err: any) {
       console.error("[API] Error fetching orders:", err);
-      res.status(500).json({ error: "Internal server error" });
+      res.status(500).json({ error: "Internal server error", details: err.message || String(err) });
     }
   });
 
@@ -242,9 +285,9 @@ async function startServer() {
         return { ...order, items: itemsWithAddons };
       }));
       res.json(ordersWithItems);
-    } catch (err) {
+    } catch (err: any) {
       console.error("[API] Error fetching admin orders:", err);
-      res.status(500).json({ error: "Internal server error" });
+      res.status(500).json({ error: "Internal server error", details: err.message || String(err) });
     }
   });
 
@@ -252,7 +295,7 @@ async function startServer() {
   app.use(express.json({ limit: '50mb' }));
 
   app.post("/api/categories", async (req, res) => {
-    let { name, image } = req.body;
+    let { name, image, sort_order } = req.body;
     console.log(`[API] Create category: ${name}`);
     try {
       if (image && image.startsWith('data:image')) {
@@ -261,22 +304,22 @@ async function startServer() {
 
       const { data, error } = await supabase
         .from('categories')
-        .insert([{ name, image }])
+        .insert([{ name, image, sort_order }])
         .select();
       if (error) throw error;
       
       notifyUpdate("menu_updated");
       await syncMenuToFile();
       res.json(data[0]);
-    } catch (e) {
-      console.error("[API] Error creating category:", e);
-      res.status(400).json({ error: "Category already exists or invalid data" });
+    } catch (err: any) {
+      console.error("[API] Error creating category:", err);
+      res.status(400).json({ error: "Category already exists or invalid data", details: err.message || String(err) });
     }
   });
 
   app.put("/api/categories/:id", async (req, res) => {
     const { id } = req.params;
-    let { name, image } = req.body;
+    let { name, image, sort_order } = req.body;
     try {
       if (image && image.startsWith('data:image')) {
         image = await uploadBase64ToStorage(image, 'categories', `cat_${id}`);
@@ -284,6 +327,7 @@ async function startServer() {
 
       const updateData: any = { image };
       if (name) updateData.name = name;
+      if (sort_order !== undefined) updateData.sort_order = sort_order;
       
       const { error } = await supabase
         .from('categories')
@@ -294,15 +338,15 @@ async function startServer() {
       notifyUpdate("menu_updated");
       await syncMenuToFile();
       res.json({ success: true });
-    } catch (e) {
-      console.error("[API] Error updating category:", e);
-      res.status(500).json({ error: "Internal server error" });
+    } catch (err: any) {
+      console.error("[API] Error updating category:", err);
+      res.status(500).json({ error: "Internal server error", details: err.message || String(err) });
     }
   });
 
   app.post("/api/items", async (req, res) => {
     try {
-      let { category_id, name, price_hot, price_cold, price_fixed, description, image } = req.body;
+      let { category_id, name, price_hot, price_cold, price_fixed, description, image, sort_order } = req.body;
       let { addons } = req.body;
 
       if (image && image.startsWith('data:image')) {
@@ -331,23 +375,23 @@ async function startServer() {
 
       const { data, error } = await supabase
         .from('items')
-        .insert([{ category_id, name, price_hot, price_cold, price_fixed, description, image, addons }])
+        .insert([{ category_id, name, price_hot, price_cold, price_fixed, description, image, addons, sort_order }])
         .select();
       if (error) throw error;
 
       notifyUpdate("menu_updated");
       await syncMenuToFile();
       res.json(data[0]);
-    } catch (e) {
-      console.error("[API] Error creating item:", e);
-      res.status(500).json({ error: "Internal server error" });
+    } catch (err: any) {
+      console.error("[API] Error creating item:", err);
+      res.status(500).json({ error: "Internal server error", details: err.message || String(err) });
     }
   });
 
   app.put("/api/items/:id", async (req, res) => {
     try {
       const { id } = req.params;
-      let { name, price_hot, price_cold, price_fixed, description, available, image, addons } = req.body;
+      let { name, price_hot, price_cold, price_fixed, description, available, image, addons, sort_order } = req.body;
       console.log(`[API] PUT /api/items/${id} | Body keys: ${Object.keys(req.body)} | Image length: ${image?.length}`);
       
       if (image && image.startsWith('data:image')) {
@@ -356,16 +400,16 @@ async function startServer() {
 
       const { error } = await supabase
         .from('items')
-        .update({ name, price_hot, price_cold, price_fixed, description, available, image, addons })
+        .update({ name, price_hot, price_cold, price_fixed, description, available, image, addons, sort_order })
         .eq('id', id);
       if (error) throw error;
       
       notifyUpdate("menu_updated");
       await syncMenuToFile();
       res.json({ success: true });
-    } catch (e) {
-      console.error("[API] Error updating item:", e);
-      res.status(500).json({ error: "Internal server error" });
+    } catch (err: any) {
+      console.error("[API] Error updating item:", err);
+      res.status(500).json({ error: "Internal server error", details: err.message || String(err) });
     }
   });
 
@@ -380,9 +424,9 @@ async function startServer() {
       notifyUpdate("menu_updated");
       await syncMenuToFile();
       res.json({ success: true });
-    } catch (e) {
-      console.error("[API] Error deleting item:", e);
-      res.status(500).json({ error: "Internal server error" });
+    } catch (err: any) {
+      console.error("[API] Error deleting item:", err);
+      res.status(500).json({ error: "Internal server error", details: err.message || String(err) });
     }
   });
 
@@ -417,9 +461,9 @@ async function startServer() {
       
       notifyUpdate("order_created", { id: orderId, user_email });
       res.json({ id: orderId, success: true });
-    } catch (err) {
+    } catch (err: any) {
       console.error("[API] Error creating order:", err);
-      res.status(500).json({ error: "Internal server error" });
+      res.status(500).json({ error: "Internal server error", details: err.message || String(err) });
     }
   });
 
@@ -451,9 +495,9 @@ async function startServer() {
     try {
       syncMenuToFile();
       res.json({ success: true });
-    } catch (err) {
+    } catch (err: any) {
       console.error("Sync error:", err);
-      res.status(500).json({ error: "Failed to sync to file" });
+      res.status(500).json({ error: "Failed to sync to file", details: err.message || String(err) });
     }
   });
 

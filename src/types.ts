@@ -9,6 +9,7 @@ export interface MenuItem {
   available: boolean;
   image?: string;
   addons?: string; // JSON string of { name: string, price: number, available?: boolean }[]
+  sort_order?: number;
 }
 
 export interface OrderItem {
@@ -36,4 +37,5 @@ export interface Category {
   name: string;
   image?: string;
   items: MenuItem[];
+  sort_order?: number;
 }
