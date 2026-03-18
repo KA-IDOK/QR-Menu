@@ -79,7 +79,16 @@ const syncMenuToFile = async () => {
     const menu = await Promise.all(categories.map(async (cat: any) => {
       const { data: items, error: itemError } = await supabase.from('items').select('*').eq('category_id', cat.id).order('sort_order', { ascending: true });
       if (itemError) throw itemError;
-      return { ...cat, items };
+      
+      // Strip base64 images to keep the file small
+      const cleanedItems = items.map((item: any) => {
+        if (item.image && item.image.startsWith('data:image')) {
+          return { ...item, image: "" };
+        }
+        return item;
+      });
+      
+      return { ...cat, items: cleanedItems };
     }));
     
     fs.writeFileSync(menuDataPath, JSON.stringify({ categories: menu }, null, 2));
@@ -110,9 +119,16 @@ async function startServer() {
   try {
     if (fs.existsSync(menuDataPath)) {
       const fileData = fs.readFileSync(menuDataPath, 'utf8');
-      const parsed = JSON.parse(fileData);
-      cachedMenu = parsed.categories || parsed;
-      console.log("[SERVER] Initialized cachedMenu from menu-data.json");
+      if (fileData && fileData.trim()) {
+        try {
+          const parsed = JSON.parse(fileData);
+          cachedMenu = parsed.categories || parsed;
+          console.log("[SERVER] Initialized cachedMenu from menu-data.json");
+        } catch (parseErr) {
+          console.error("[SERVER] JSON Parse Error in menu-data.json:", parseErr);
+          // If JSON is corrupted, we might want to try a partial recovery or just log it
+        }
+      }
     }
   } catch (err) {
     console.error("[SERVER] Error loading initial menu-data.json:", err);

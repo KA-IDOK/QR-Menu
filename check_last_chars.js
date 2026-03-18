@@ -1,12 +1,8 @@
 import fs from 'fs';
-
 const stats = fs.statSync('menu-data.json');
-const bufferSize = 10;
-const buffer = Buffer.alloc(bufferSize);
-
+console.log(`File size: ${stats.size} bytes`);
 const fd = fs.openSync('menu-data.json', 'r');
-fs.readSync(fd, buffer, 0, bufferSize, stats.size - bufferSize);
+const buffer = Buffer.alloc(100);
+fs.readSync(fd, buffer, 0, 100, Math.max(0, stats.size - 100));
+console.log(`Last 100 chars: ${buffer.toString()}`);
 fs.closeSync(fd);
-
-console.log('Last 10 characters (hex):', buffer.toString('hex'));
-console.log('Last 10 characters (utf8):', buffer.toString('utf8'));
