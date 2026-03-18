@@ -75,6 +75,8 @@ function CustomerMenuContent() {
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<'GCash' | 'Card' | 'Counter'>('Counter');
+  const [showPaymentInstruction, setShowPaymentInstruction] = useState(false);
+  const [paymentInstructionMessage, setPaymentInstructionMessage] = useState('');
   
   const [customerId] = useState(() => {
     const saved = localStorage.getItem('cafe_customer_id');
@@ -220,12 +222,22 @@ function CustomerMenuContent() {
     }
   };
 
-  const handlePay = async (orderId: string) => {
-    try {
-      await apiFetch(`/api/orders/${orderId}/pay`, { method: 'PUT' });
-      fetchOrders();
-    } catch (err) {
-      console.error("Error paying order", err);
+  const handlePay = (orderId: string) => {
+    const order = orders.find(o => o.id === orderId);
+    if (order) {
+      let message = '';
+      const method = order.payment_method?.toLowerCase() || '';
+      
+      if (method === 'gcash') {
+        message = "The QR Code is on the counter please proceed for payment";
+      } else if (method === 'card') {
+        message = "Please proceed to the counter to process the payment";
+      } else {
+        message = "Please proceed to counter for payment";
+      }
+      
+      setPaymentInstructionMessage(message);
+      setShowPaymentInstruction(true);
     }
   };
 
@@ -1058,6 +1070,41 @@ function CustomerMenuContent() {
                   </button>
                 </div>
               </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      {/* Payment Instruction Modal */}
+      <AnimatePresence>
+        {showPaymentInstruction && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[70] flex items-center justify-center px-6 bg-black/80 backdrop-blur-sm"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              className="bg-white w-full max-w-sm rounded-[3rem] p-8 border-4 border-black shadow-2xl text-center"
+            >
+              <div className="w-20 h-20 bg-black rounded-full flex items-center justify-center mx-auto mb-6 shadow-xl">
+                <CreditCard className="text-white w-10 h-10" />
+              </div>
+              
+              <h2 className="text-2xl font-black uppercase tracking-tighter mb-4">Payment Instruction</h2>
+              
+              <p className="text-gray-600 font-bold uppercase tracking-widest text-[11px] leading-relaxed mb-8 px-4">
+                {paymentInstructionMessage}
+              </p>
+
+              <button 
+                onClick={() => setShowPaymentInstruction(false)}
+                className="w-full bg-black text-white py-5 rounded-2xl font-black uppercase tracking-widest hover:bg-gray-900 active:scale-95 transition-all shadow-xl"
+              >
+                Got it!
+              </button>
             </motion.div>
           </motion.div>
         )}
