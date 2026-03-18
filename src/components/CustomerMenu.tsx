@@ -118,8 +118,10 @@ function CustomerMenuContent() {
     socket.on('order_created', (data) => {
       if (data.user_email === customerId) fetchOrders();
     });
-    socket.on('order_updated', (data) => {
-      if (data.user_email === customerId) fetchOrders();
+    socket.on('order_updated', () => {
+      // Since order_updated doesn't always send user_email, just fetch to be safe
+      // It's a lightweight call
+      fetchOrders();
     });
 
     return () => {
@@ -354,7 +356,7 @@ function CustomerMenuContent() {
                     <div className="flex items-center gap-6 mb-8">
                       {cat.image && (
                         <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-black shrink-0">
-                          <img src={cat.image} alt={cat.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                          <img src={cat.image} alt={cat.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" loading="lazy" decoding="async" />
                         </div>
                       )}
                       <h3 className="text-2xl font-black text-black uppercase tracking-tight">{cat.name}</h3>
@@ -364,7 +366,7 @@ function CustomerMenuContent() {
                     <div className="mb-12">
                       {cat.image && (
                         <div className="w-full h-48 rounded-[2.5rem] overflow-hidden border-4 border-black mb-6 shadow-xl">
-                          <img src={cat.image} alt={cat.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                          <img src={cat.image} alt={cat.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" loading="lazy" decoding="async" />
                         </div>
                       )}
                       <h2 className="text-4xl font-black text-black uppercase tracking-tighter">{cat.name}</h2>
@@ -388,6 +390,7 @@ function CustomerMenuContent() {
                               className="w-full h-full object-cover" 
                               referrerPolicy="no-referrer" 
                               loading="lazy"
+                              decoding="async"
                             />
                           </div>
                         )}

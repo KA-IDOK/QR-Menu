@@ -93,9 +93,14 @@ async function startServer() {
   const PORT = Number(process.env.PORT) || 3000;
   const isProd = process.env.NODE_ENV === 'production';
 
+  let cachedMenu: any = null;
+
   // Helper to notify all clients of updates
   const notifyUpdate = (type: string, data?: any) => {
     console.log(`[SOCKET] Notifying update: ${type}`);
+    if (type === "menu_updated") {
+      cachedMenu = null;
+    }
     io.emit(type, data);
   };
 
@@ -141,16 +146,32 @@ async function startServer() {
   const getMenu = async (req: any, res: any) => {
     console.log(`[API] HIT: getMenu | Method: ${req.method} | URL: ${req.url}`);
     try {
-      const { data: categories, error: catError } = await supabase.from('categories').select('*');
-      if (catError) throw catError;
+      if (cachedMenu) {
+        console.log(`[API] Returning cached menu`);
+        return res.json(cachedMenu);
+      }
+
+      const [categoriesRes, itemsRes] = await Promise.all([
+        supabase.from('categories').select('*'),
+        supabase.from('items').select('*')
+      ]);
+
+      if (categoriesRes.error) throw categoriesRes.error;
+      if (itemsRes.error) throw itemsRes.error;
       
-      const menu = await Promise.all(categories.map(async (cat: any) => {
-        const { data: items, error: itemError } = await supabase.from('items').select('*').eq('category_id', cat.id);
-        if (itemError) throw itemError;
-        return { ...cat, items };
-      }));
+      const categories = categoriesRes.data || [];
+      const items = itemsRes.data || [];
+
+      const menu = categories.map((cat: any) => {
+        return {
+          ...cat,
+          items: items.filter((item: any) => item.category_id === cat.id)
+        };
+      });
       
-      console.log(`[API] /menu returning ${menu.length} categories`);
+      console.log(`[API] /menu returning ${menu.length} categories (fetched from DB)`);
+      cachedMenu = menu;
+      
       res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
       res.setHeader('Pragma', 'no-cache');
       res.setHeader('Expires', '0');

@@ -379,7 +379,7 @@ function AdminDashboardContent() {
                   <div className="flex items-center gap-6 mb-8">
                     {cat.image && (
                       <div className="w-16 h-16 rounded-2xl overflow-hidden border-2 border-black shrink-0">
-                        <img src={cat.image} alt={cat.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                        <img src={cat.image} alt={cat.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" loading="lazy" decoding="async" />
                       </div>
                     )}
                     <div className="flex-1">
@@ -421,6 +421,7 @@ function AdminDashboardContent() {
                                 className="w-full h-full object-cover" 
                                 referrerPolicy="no-referrer" 
                                 loading="lazy"
+                                decoding="async"
                               />
                             </div>
                           )}
