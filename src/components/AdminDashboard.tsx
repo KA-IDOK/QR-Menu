@@ -224,7 +224,8 @@ function AdminDashboardContent() {
     reader.readAsDataURL(file);
   };
 
-  const customerUrl = window.location.origin;
+  // Use the public shared URL for the QR code so customers can access it without logging into the dev environment
+  const customerUrl = window.location.origin.replace('ais-dev', 'ais-pre');
 
   if (!isAdmin) return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 p-6">
