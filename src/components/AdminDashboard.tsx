@@ -385,36 +385,20 @@ function AdminDashboardContent() {
                     )}
                     <div className="flex-1">
                       <h3 className="text-2xl font-black text-black uppercase tracking-tight">{cat.name}</h3>
-                      <div className="flex gap-4">
-                        <button 
-                          onClick={() => {
-                            const newImage = window.prompt("Enter Category Image URL:", cat.image || "");
-                            if (newImage !== null) {
-                              apiFetch(`/api/categories/${cat.id}`, {
-                                method: 'PUT',
-                                body: JSON.stringify({ image: newImage })
-                              }).then(fetchMenu);
-                            }
-                          }}
-                          className="text-[8px] font-black uppercase tracking-widest text-gray-400 hover:text-black transition-colors"
-                        >
-                          Change Image
-                        </button>
-                        <button 
-                          onClick={() => {
-                            const newOrder = window.prompt("Enter Category Sort Order (number):", (cat.sort_order || 0).toString());
-                            if (newOrder !== null) {
-                              apiFetch(`/api/categories/${cat.id}`, {
-                                method: 'PUT',
-                                body: JSON.stringify({ sort_order: Number(newOrder) })
-                              }).then(fetchMenu);
-                            }
-                          }}
-                          className="text-[8px] font-black uppercase tracking-widest text-gray-400 hover:text-black transition-colors"
-                        >
-                          Change Order
-                        </button>
-                      </div>
+                      <button 
+                        onClick={() => {
+                          const newImage = window.prompt("Enter Category Image URL:", cat.image || "");
+                          if (newImage !== null) {
+                            apiFetch(`/api/categories/${cat.id}`, {
+                              method: 'PUT',
+                              body: JSON.stringify({ image: newImage })
+                            }).then(fetchMenu);
+                          }
+                        }}
+                        className="text-[8px] font-black uppercase tracking-widest text-gray-400 hover:text-black transition-colors"
+                      >
+                        Change Image
+                      </button>
                     </div>
                     <div className="h-1 flex-1 bg-black/5 rounded-full"></div>
                     <button 
@@ -1058,18 +1042,8 @@ function AdminDashboardContent() {
                     />
                   </div>
 
-                  <div className="grid grid-cols-4 gap-4">
-                    <div className="col-span-1">
-                      <label className="block text-[10px] font-black uppercase tracking-widest mb-3">Sort Order</label>
-                      <input 
-                        type="number"
-                        value={editingItem.sort_order ?? ''}
-                        onChange={(e) => setEditingItem({...editingItem, sort_order: e.target.value ? Number(e.target.value) : undefined})}
-                        className="w-full px-4 py-4 rounded-2xl border-2 border-black font-bold focus:ring-4 focus:ring-black/5 outline-none transition-all"
-                        placeholder="0"
-                      />
-                    </div>
-                    <div className="col-span-1">
+                  <div className="grid grid-cols-3 gap-4">
+                    <div>
                       <label className="block text-[10px] font-black uppercase tracking-widest mb-3">Fixed Price</label>
                       <input 
                         type="number"
@@ -1079,7 +1053,7 @@ function AdminDashboardContent() {
                         placeholder="₱"
                       />
                     </div>
-                    <div className="col-span-1">
+                    <div>
                       <label className="block text-[10px] font-black uppercase tracking-widest mb-3">Hot Price</label>
                       <input 
                         type="number"
@@ -1089,7 +1063,7 @@ function AdminDashboardContent() {
                         placeholder="₱"
                       />
                     </div>
-                    <div className="col-span-1">
+                    <div>
                       <label className="block text-[10px] font-black uppercase tracking-widest mb-3">Cold Price</label>
                       <input 
                         type="number"
