@@ -65,11 +65,35 @@ const syncMenuToFile = async () => {
     const { data: categories, error: catError } = await supabase.from('categories').select('*');
     if (catError) throw catError;
     
-    const menu = await Promise.all(categories.map(async (cat: any) => {
-      const { data: items, error: itemError } = await supabase.from('items').select('*').eq('category_id', cat.id);
-      if (itemError) throw itemError;
+    const { data: allItems, error: itemError } = await supabase.from('items').select('*');
+    if (itemError) throw itemError;
+
+    const menu = categories.map((cat: any) => {
+      const items = (allItems || []).filter((item: any) => item.category_id === cat.id);
       return { ...cat, items };
-    }));
+    });
+
+    const categoryOrder = [
+      "BODEGA X LINEAR COFFEE ROASTERS",
+      "SPECIALTY ESPRESSO BEVERAGES",
+      "HOT TEA",
+      "NON-ESPRESSO BEVERAGES",
+      "COMFORT FOOD",
+      "SWEET TREATS",
+      "JUICES & FRUIT TEAS",
+      "SMOOTHIES & FRAPPES",
+      "SODA POP",
+      "QUICK BITES"
+    ];
+
+    menu.sort((a: any, b: any) => {
+      const indexA = categoryOrder.indexOf(a.name.toUpperCase());
+      const indexB = categoryOrder.indexOf(b.name.toUpperCase());
+      if (indexA !== -1 && indexB !== -1) return indexA - indexB;
+      if (indexA !== -1) return -1;
+      if (indexB !== -1) return 1;
+      return a.name.localeCompare(b.name);
+    });
     
     fs.writeFileSync(menuDataPath, JSON.stringify({ categories: menu }, null, 2));
     console.log("[SERVER] Menu synced to menu-data.json");
@@ -151,14 +175,26 @@ async function startServer() {
         return res.json(cachedMenu);
       }
 
-      const [categoriesRes, itemsRes] = await Promise.all([
-        supabase.from('categories').select('*'),
-        supabase.from('items').select('*')
-      ]);
-
-      if (categoriesRes.error) throw categoriesRes.error;
-      if (itemsRes.error) throw itemsRes.error;
+      let categoriesRes, itemsRes;
+      let retries = 3;
       
+      while (retries > 0) {
+        try {
+          categoriesRes = await supabase.from('categories').select('*');
+          if (categoriesRes.error) throw categoriesRes.error;
+          
+          itemsRes = await supabase.from('items').select('*');
+          if (itemsRes.error) throw itemsRes.error;
+          
+          break; // Success
+        } catch (e: any) {
+          console.warn(`[API] Supabase fetch failed, retries left: ${retries - 1}`, e.message || e);
+          retries--;
+          if (retries === 0) throw e;
+          await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1s before retry
+        }
+      }
+
       const categories = categoriesRes.data || [];
       const items = itemsRes.data || [];
 
@@ -167,6 +203,28 @@ async function startServer() {
           ...cat,
           items: items.filter((item: any) => item.category_id === cat.id)
         };
+      });
+
+      const categoryOrder = [
+        "BODEGA X LINEAR COFFEE ROASTERS",
+        "SPECIALTY ESPRESSO BEVERAGES",
+        "HOT TEA",
+        "NON-ESPRESSO BEVERAGES",
+        "COMFORT FOOD",
+        "SWEET TREATS",
+        "JUICES & FRUIT TEAS",
+        "SMOOTHIES & FRAPPES",
+        "SODA POP",
+        "QUICK BITES"
+      ];
+
+      menu.sort((a: any, b: any) => {
+        const indexA = categoryOrder.indexOf(a.name.toUpperCase());
+        const indexB = categoryOrder.indexOf(b.name.toUpperCase());
+        if (indexA !== -1 && indexB !== -1) return indexA - indexB;
+        if (indexA !== -1) return -1;
+        if (indexB !== -1) return 1;
+        return a.name.localeCompare(b.name);
       });
       
       console.log(`[API] /menu returning ${menu.length} categories (fetched from DB)`);
@@ -200,19 +258,26 @@ async function startServer() {
         .order('created_at', { ascending: false });
       if (orderError) throw orderError;
 
-      const ordersWithItems = await Promise.all(orders.map(async (order: any) => {
+      const orderIds = orders.map((o: any) => o.id);
+      let allItems: any[] = [];
+      
+      if (orderIds.length > 0) {
         const { data: items, error: itemError } = await supabase
           .from('order_items')
           .select('*')
-          .eq('order_id', order.id);
+          .in('order_id', orderIds);
         if (itemError) throw itemError;
-        
-        const itemsWithAddons = items.map((item: any) => ({
+        allItems = items || [];
+      }
+
+      const ordersWithItems = orders.map((order: any) => {
+        const orderItems = allItems.filter((item: any) => item.order_id === order.id);
+        const itemsWithAddons = orderItems.map((item: any) => ({
           ...item,
           selected_addons: item.selected_addons ? (typeof item.selected_addons === 'string' ? JSON.parse(item.selected_addons) : item.selected_addons) : []
         }));
         return { ...order, items: itemsWithAddons };
-      }));
+      });
       res.json(ordersWithItems);
     } catch (err) {
       console.error("[API] Error fetching orders:", err);
@@ -228,19 +293,31 @@ async function startServer() {
         .order('created_at', { ascending: false });
       if (orderError) throw orderError;
 
-      const ordersWithItems = await Promise.all(orders.map(async (order: any) => {
-        const { data: items, error: itemError } = await supabase
-          .from('order_items')
-          .select('*')
-          .eq('order_id', order.id);
-        if (itemError) throw itemError;
-        
-        const itemsWithAddons = items.map((item: any) => ({
+      const orderIds = orders.map((o: any) => o.id);
+      let allItems: any[] = [];
+      
+      if (orderIds.length > 0) {
+        // Supabase limits .in() to 1000 items, but we'll assume it's fine for now or we can batch
+        // To be safe, let's fetch in batches if orderIds is large
+        for (let i = 0; i < orderIds.length; i += 500) {
+          const batch = orderIds.slice(i, i + 500);
+          const { data: items, error: itemError } = await supabase
+            .from('order_items')
+            .select('*')
+            .in('order_id', batch);
+          if (itemError) throw itemError;
+          allItems = allItems.concat(items || []);
+        }
+      }
+
+      const ordersWithItems = orders.map((order: any) => {
+        const orderItems = allItems.filter((item: any) => item.order_id === order.id);
+        const itemsWithAddons = orderItems.map((item: any) => ({
           ...item,
           selected_addons: item.selected_addons ? (typeof item.selected_addons === 'string' ? JSON.parse(item.selected_addons) : item.selected_addons) : []
         }));
         return { ...order, items: itemsWithAddons };
-      }));
+      });
       res.json(ordersWithItems);
     } catch (err) {
       console.error("[API] Error fetching admin orders:", err);

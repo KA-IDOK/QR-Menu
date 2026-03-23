@@ -354,21 +354,25 @@ function CustomerMenuContent() {
                 <section key={cat.id}>
                   {activeCategory === null ? (
                     <div className="flex items-center gap-6 mb-8">
-                      {cat.image && (
-                        <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-black shrink-0">
+                      <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-black shrink-0 bg-gray-100 flex items-center justify-center">
+                        {cat.image ? (
                           <img src={cat.image} alt={cat.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" loading="lazy" decoding="async" />
-                        </div>
-                      )}
+                        ) : (
+                          <Coffee className="w-6 h-6 text-gray-400" />
+                        )}
+                      </div>
                       <h3 className="text-2xl font-black text-black uppercase tracking-tight">{cat.name}</h3>
                       <div className="h-1 flex-1 bg-black/5 rounded-full"></div>
                     </div>
                   ) : (
                     <div className="mb-12">
-                      {cat.image && (
-                        <div className="w-full h-48 rounded-[2.5rem] overflow-hidden border-4 border-black mb-6 shadow-xl">
+                      <div className="w-full h-48 rounded-[2.5rem] overflow-hidden border-4 border-black mb-6 shadow-xl bg-gray-100 flex items-center justify-center">
+                        {cat.image ? (
                           <img src={cat.image} alt={cat.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" loading="lazy" decoding="async" />
-                        </div>
-                      )}
+                        ) : (
+                          <Coffee className="w-16 h-16 text-gray-400" />
+                        )}
+                      </div>
                       <h2 className="text-4xl font-black text-black uppercase tracking-tighter">{cat.name}</h2>
                       <p className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.3em] mt-2">Discover our {cat.name.toLowerCase()} selection</p>
                     </div>
@@ -382,8 +386,8 @@ function CustomerMenuContent() {
                         {/* Decorative background element */}
                         <div className="absolute -right-4 -top-4 w-16 h-16 bg-black/5 rounded-full group-hover:bg-white/10 transition-colors" />
                         
-                        {item.image && (
-                          <div className="relative w-full aspect-video rounded-xl overflow-hidden mb-4 border border-black/10 group-hover:border-white/20 transition-colors">
+                        <div className="relative w-full aspect-video rounded-xl overflow-hidden mb-4 border border-black/10 group-hover:border-white/20 transition-colors bg-gray-100 flex items-center justify-center">
+                          {item.image ? (
                             <img 
                               src={item.image} 
                               alt={item.name} 
@@ -392,8 +396,10 @@ function CustomerMenuContent() {
                               loading="lazy"
                               decoding="async"
                             />
-                          </div>
-                        )}
+                          ) : (
+                            <Coffee className="w-12 h-12 text-gray-400" />
+                          )}
+                        </div>
 
                         <div className="relative z-10">
                           <div className="flex justify-between items-start mb-3">
@@ -801,8 +807,8 @@ function CustomerMenuContent() {
                 ) : (
                   cart.map((item, idx) => (
                     <div key={`${item.id}-${item.selectedType}-${idx}`} className="flex gap-4 items-center bg-gray-50 p-4 rounded-2xl border-2 border-black/5">
-                      {item.image && (
-                        <div className="w-16 h-16 rounded-xl overflow-hidden border border-black/10 shrink-0">
+                      <div className="w-16 h-16 rounded-xl overflow-hidden border border-black/10 shrink-0 bg-gray-100 flex items-center justify-center">
+                        {item.image ? (
                           <img 
                             src={item.image} 
                             alt={item.name} 
@@ -810,8 +816,10 @@ function CustomerMenuContent() {
                             referrerPolicy="no-referrer" 
                             loading="lazy"
                           />
-                        </div>
-                      )}
+                        ) : (
+                          <Coffee className="w-6 h-6 text-gray-400" />
+                        )}
+                      </div>
                       <div className="flex-1">
                         <div className="flex justify-between items-center mb-2 pr-2">
                           <div>

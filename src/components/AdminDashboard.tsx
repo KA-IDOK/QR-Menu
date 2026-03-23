@@ -378,11 +378,13 @@ function AdminDashboardContent() {
                 .map(cat => (
                 <section key={cat.id}>
                   <div className="flex items-center gap-6 mb-8">
-                    {cat.image && (
-                      <div className="w-16 h-16 rounded-2xl overflow-hidden border-2 border-black shrink-0">
+                    <div className="w-16 h-16 rounded-2xl overflow-hidden border-2 border-black shrink-0 bg-gray-100 flex items-center justify-center">
+                      {cat.image ? (
                         <img src={cat.image} alt={cat.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" loading="lazy" decoding="async" />
-                      </div>
-                    )}
+                      ) : (
+                        <Coffee className="w-8 h-8 text-gray-400" />
+                      )}
+                    </div>
                     <div className="flex-1">
                       <h3 className="text-2xl font-black text-black uppercase tracking-tight">{cat.name}</h3>
                       <button 
@@ -414,8 +416,8 @@ function AdminDashboardContent() {
                     {cat.items.map(item => (
                       <div key={item.id} className="bg-white p-8 rounded-2xl border-2 border-black shadow-sm hover:shadow-xl transition-all flex justify-between items-center group relative overflow-hidden">
                         <div className="flex gap-6 items-center relative z-10">
-                          {item.image && (
-                            <div className="w-20 h-20 rounded-xl overflow-hidden border-2 border-black shrink-0">
+                          <div className="w-20 h-20 rounded-xl overflow-hidden border-2 border-black shrink-0 bg-gray-100 flex items-center justify-center">
+                            {item.image ? (
                               <img 
                                 src={item.image} 
                                 alt={item.name} 
@@ -424,8 +426,10 @@ function AdminDashboardContent() {
                                 loading="lazy"
                                 decoding="async"
                               />
-                            </div>
-                          )}
+                            ) : (
+                              <Coffee className="w-8 h-8 text-gray-400" />
+                            )}
+                          </div>
                           <div>
                             <h4 className="text-lg font-black text-black uppercase tracking-tight">{item.name}</h4>
                             <div className="flex gap-4 mt-2">
