@@ -59,13 +59,15 @@ const uploadBase64ToStorage = async (base64Str: string, folder: string, filename
   }
 };
 
+let cachedMenu: any = null;
+
 // Helper to sync database to JSON file for "code permanence"
 const syncMenuToFile = async () => {
   try {
-    const { data: categories, error: catError } = await supabase.from('categories').select('*');
+    const { data: categories, error: catError } = await supabase.from('categories').select('*').order('id', { ascending: true });
     if (catError) throw catError;
     
-    const { data: allItems, error: itemError } = await supabase.from('items').select('*');
+    const { data: allItems, error: itemError } = await supabase.from('items').select('*').order('id', { ascending: true });
     if (itemError) throw itemError;
 
     const menu = categories.map((cat: any) => {
@@ -95,8 +97,9 @@ const syncMenuToFile = async () => {
       return a.name.localeCompare(b.name);
     });
     
+    cachedMenu = menu; // Update cache directly
     fs.writeFileSync(menuDataPath, JSON.stringify({ categories: menu }, null, 2));
-    console.log("[SERVER] Menu synced to menu-data.json");
+    console.log("[SERVER] Menu synced to menu-data.json and cache updated");
   } catch (err) {
     console.error("[SERVER] Error syncing menu to file:", err);
   }
@@ -117,7 +120,8 @@ async function startServer() {
   const PORT = Number(process.env.PORT) || 3000;
   const isProd = process.env.NODE_ENV === 'production';
 
-  let cachedMenu: any = null;
+  // Pre-warm the menu cache on startup
+  syncMenuToFile();
 
   // Helper to notify all clients of updates
   const notifyUpdate = (type: string, data?: any) => {
@@ -180,10 +184,10 @@ async function startServer() {
       
       while (retries > 0) {
         try {
-          categoriesRes = await supabase.from('categories').select('*');
+          categoriesRes = await supabase.from('categories').select('*').order('id', { ascending: true });
           if (categoriesRes.error) throw categoriesRes.error;
           
-          itemsRes = await supabase.from('items').select('*');
+          itemsRes = await supabase.from('items').select('*').order('id', { ascending: true });
           if (itemsRes.error) throw itemsRes.error;
           
           break; // Success

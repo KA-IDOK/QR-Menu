@@ -278,6 +278,7 @@ function AdminDashboardContent() {
               alt="Bodega Logo" 
               className="w-full h-full object-cover"
               referrerPolicy="no-referrer"
+              fetchPriority="high"
             />
           </div>
           <h1 className="text-xl font-black tracking-tighter uppercase">Bodega Admin</h1>

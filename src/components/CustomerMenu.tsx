@@ -271,6 +271,7 @@ function CustomerMenuContent() {
                 alt="Bodega Logo" 
                 className="w-full h-full object-cover"
                 referrerPolicy="no-referrer"
+                fetchPriority="high"
               />
             </div>
             <div className="text-left flex-1">
